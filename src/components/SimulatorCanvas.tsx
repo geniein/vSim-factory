@@ -485,143 +485,136 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
               </g>
             );
           })}
-
-          {/* ============================================================== */}
-          {/* CYBER HUD TERMINALS: LIVE PLC REGISTER OVERLAYS */}
-          {/* ============================================================== */}
-
-          {/* PLC #1 Spawner/Feeder HUD Box */}
-          <g transform="translate(15, 290)">
-            <rect
-              width="130"
-              height="85"
-              rx="6"
-              fill="rgba(8, 12, 24, 0.93)"
-              stroke={displayPlc.feeder.online ? "var(--color-cyber-blue)" : "rgba(255,255,255,0.08)"}
-              strokeWidth="1.2"
-              filter={displayPlc.feeder.online ? "url(#glow-blue-filter)" : "none"}
-            />
-            {/* Header */}
-            <rect width="130" height="18" rx="6" fill="rgba(255,255,255,0.03)" />
-            <text x="8" y="12" fill={displayPlc.feeder.online ? "var(--color-cyber-blue)" : "var(--text-muted)"} fontSize="7.5" fontWeight="bold" className="font-mono-tech">
-              PLC_01 [Modbus TCP]
-            </text>
-            <circle cx="120" cy="9" r="3.5" fill={displayPlc.feeder.online ? "var(--color-cyber-blue)" : "#475569"} />
-            
-            {/* Registers */}
-            <text x="8" y="32" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              STATUS : <tspan fill={displayPlc.feeder.online ? "var(--color-active-green)" : "var(--color-error-crimson)"} fontWeight="bold">{displayPlc.feeder.online ? "ONLINE" : "OFFLINE"}</tspan>
-            </text>
-            <text x="8" y="46" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %QX0.0 (Feed Conv) : <tspan fill={displayPlc.feeder.run ? "var(--color-active-green)" : "var(--text-muted)"} fontWeight="bold">{displayPlc.feeder.run ? "RUN" : "STOP"}</tspan>
-            </text>
-            <text x="8" y="60" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %IX0.2 (Part Sens) : <tspan fill={displayPlc.feeder.run ? "var(--color-active-green)" : "var(--text-muted)"}>{displayPlc.feeder.run ? "ACTIVE" : "EMPTY"}</tspan>
-            </text>
-            <text x="8" y="74" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %QX0.6 (Alarm LED) : <tspan fill={displayPlc.feeder.err ? "var(--color-error-crimson)" : "var(--color-active-green)"}>{displayPlc.feeder.err ? "WARN" : "SAFE"}</tspan>
-            </text>
-          </g>
-
-          {/* PLC #2 CNC HUD Box */}
-          <g transform="translate(215, 290)">
-            <rect
-              width="130"
-              height="85"
-              rx="6"
-              fill="rgba(8, 12, 24, 0.93)"
-              stroke={displayPlc.cnc.online ? "var(--color-cyber-blue)" : "rgba(255,255,255,0.08)"}
-              strokeWidth="1.2"
-              filter={displayPlc.cnc.online ? "url(#glow-blue-filter)" : "none"}
-            />
-            {/* Header */}
-            <rect width="130" height="18" rx="6" fill="rgba(255,255,255,0.03)" />
-            <text x="8" y="12" fill={displayPlc.cnc.online ? "var(--color-cyber-blue)" : "var(--text-muted)"} fontSize="7.5" fontWeight="bold" className="font-mono-tech">
-              PLC_02 [Siemens S7]
-            </text>
-            <circle cx="120" cy="9" r="3.5" fill={displayPlc.cnc.online ? "var(--color-cyber-blue)" : "#475569"} />
-
-            {/* Registers */}
-            <text x="8" y="32" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %IW0 (Pos) : <tspan fill="var(--color-cyber-blue)" fontWeight="bold">{displayPlc.cnc.pos} mm</tspan>
-            </text>
-            <text x="8" y="46" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %MW1 (Speed) : <tspan fill="var(--color-warning-amber)">{displayPlc.cnc.speed} mm/s</tspan>
-            </text>
-            <text x="8" y="60" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %QX0.1 (Robot) : <tspan fill={displayPlc.cnc.lift ? "var(--color-warning-amber)" : "var(--text-muted)"}>{displayPlc.cnc.lift ? "L_DN" : "L_UP"}</tspan> | <tspan fill={displayPlc.cnc.clamp ? "var(--color-active-green)" : "var(--text-muted)"}>{displayPlc.cnc.clamp ? "CLMP" : "OPEN"}</tspan>
-            </text>
-            <text x="8" y="74" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %MW0 (Count) : <tspan fill="var(--color-cyber-blue)" fontWeight="bold">{displayPlc.cnc.completed} ea</tspan>
-            </text>
-          </g>
-
-          {/* PLC #3 QC HUD Box */}
-          <g transform="translate(455, 290)">
-            <rect
-              width="130"
-              height="85"
-              rx="6"
-              fill="rgba(8, 12, 24, 0.93)"
-              stroke={displayPlc.qc.online ? "var(--color-cyber-purple)" : "rgba(255,255,255,0.08)"}
-              strokeWidth="1.2"
-              filter={displayPlc.qc.online ? "url(#glow-purple-filter)" : "none"}
-            />
-            {/* Header */}
-            <rect width="130" height="18" rx="6" fill="rgba(255,255,255,0.03)" />
-            <text x="8" y="12" fill={displayPlc.qc.online ? "var(--color-cyber-purple)" : "var(--text-muted)"} fontSize="7.5" fontWeight="bold" className="font-mono-tech">
-              PLC_03 [MELSEC MC]
-            </text>
-            <circle cx="120" cy="9" r="3.5" fill={displayPlc.qc.online ? "var(--color-cyber-purple)" : "#475569"} />
-
-            {/* Registers */}
-            <text x="8" y="32" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              STATUS : <tspan fill={displayPlc.qc.online ? "var(--color-active-green)" : "var(--color-error-crimson)"} fontWeight="bold">{displayPlc.qc.online ? "ONLINE" : "OFFLINE"}</tspan>
-            </text>
-            <text x="8" y="46" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %QX0.3 (Laser) : <tspan fill={displayPlc.qc.laser ? "var(--color-active-green)" : "var(--text-muted)"} fontWeight="bold">{displayPlc.qc.laser ? "EMITTING" : "STANDBY"}</tspan>
-            </text>
-            <text x="8" y="60" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %IX0.5 (Vision) : <tspan fill={displayPlc.qc.laser ? "var(--color-cyber-purple)" : "var(--text-muted)"}>{displayPlc.qc.laser ? "SCANNING" : "WAIT"}</tspan>
-            </text>
-            <text x="8" y="74" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              D0000 (Checked) : <tspan fill="var(--color-cyber-purple)" fontWeight="bold">{displayPlc.qc.completed} ea</tspan>
-            </text>
-          </g>
-
-          {/* PLC #4 Sorter HUD Box */}
-          <g transform="translate(685, 290)">
-            <rect
-              width="135"
-              height="85"
-              rx="6"
-              fill="rgba(8, 12, 24, 0.93)"
-              stroke={displayPlc.sorter.online ? "var(--color-active-green)" : "rgba(255,255,255,0.08)"}
-              strokeWidth="1.2"
-              filter={displayPlc.sorter.online ? "url(#glow-green-filter)" : "none"}
-            />
-            {/* Header */}
-            <rect width="135" height="18" rx="6" fill="rgba(255,255,255,0.03)" />
-            <text x="8" y="12" fill={displayPlc.sorter.online ? "var(--color-active-green)" : "var(--text-muted)"} fontSize="7.5" fontWeight="bold" className="font-mono-tech">
-              PLC_04 [LS-XGT FEnet]
-            </text>
-            <circle cx="125" cy="9" r="3.5" fill={displayPlc.sorter.online ? "var(--color-active-green)" : "#475569"} />
-
-            {/* Registers */}
-            <text x="8" y="32" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %MW0 (Total Out) : <tspan fill="var(--color-active-green)" fontWeight="bold">{displayPlc.sorter.completed} ea</tspan>
-            </text>
-            <text x="8" y="46" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %MW1 (Con Speed) : <tspan fill="var(--color-cyber-blue)">{displayPlc.sorter.speed} mm/s</tspan>
-            </text>
-            <text x="8" y="60" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %PX4 (Exit Gate) : <tspan fill={displayPlc.sorter.exit ? "var(--color-active-green)" : "var(--text-muted)"} fontWeight="bold">{displayPlc.sorter.exit ? "PASS" : "BLOCK"}</tspan>
-            </text>
-            <text x="8" y="74" fill="var(--text-secondary)" fontSize="7" className="font-mono-tech">
-              %QX0.6 (Alarm LED) : <tspan fill="var(--color-active-green)">SAFE</tspan>
-            </text>
-          </g>
         </svg>
+      </div>
+
+      {/* ============================================================== */}
+      {/* CYBER HUD TERMINALS: LIVE PLC REGISTER PANELS */}
+      {/* ============================================================== */}
+      <div className="plc-hud-grid">
+        {/* PLC #1 Spawner/Feeder HUD */}
+        <div className={`plc-hud-card ${displayPlc.feeder.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-cyber-blue)' } as React.CSSProperties}>
+          <div className="plc-hud-header">
+            <span className="plc-hud-title font-mono-tech">PLC_01 [Modbus TCP]</span>
+            <span className={`plc-hud-status-dot ${displayPlc.feeder.online ? 'active' : 'inactive'}`} />
+          </div>
+          <div className="plc-hud-body font-mono-tech">
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">STATUS</span>
+              <span className={`plc-hud-value ${displayPlc.feeder.online ? 'text-green' : 'text-red'}`}>
+                {displayPlc.feeder.online ? "ONLINE" : "OFFLINE"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%QX0.0 (Feed Conv)</span>
+              <span className={`plc-hud-value ${displayPlc.feeder.run ? 'text-green' : 'text-muted'}`}>
+                {displayPlc.feeder.run ? "RUN" : "STOP"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%IX0.2 (Part Sens)</span>
+              <span className={`plc-hud-value ${displayPlc.feeder.run ? 'text-green' : 'text-muted'}`}>
+                {displayPlc.feeder.run ? "ACTIVE" : "EMPTY"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%QX0.6 (Alarm LED)</span>
+              <span className={`plc-hud-value ${displayPlc.feeder.err ? 'text-red' : 'text-green'}`}>
+                {displayPlc.feeder.err ? "WARN" : "SAFE"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* PLC #2 CNC HUD */}
+        <div className={`plc-hud-card ${displayPlc.cnc.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-cyber-blue)' } as React.CSSProperties}>
+          <div className="plc-hud-header">
+            <span className="plc-hud-title font-mono-tech">PLC_02 [Siemens S7]</span>
+            <span className={`plc-hud-status-dot ${displayPlc.cnc.online ? 'active' : 'inactive'}`} />
+          </div>
+          <div className="plc-hud-body font-mono-tech">
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%IW0 (Position)</span>
+              <span className="plc-hud-value text-blue">{displayPlc.cnc.pos} mm</span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%MW1 (Speed)</span>
+              <span className="plc-hud-value text-amber">{displayPlc.cnc.speed} mm/s</span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%QX0.1 (Robot arm)</span>
+              <span className="plc-hud-value">
+                <span className={displayPlc.cnc.lift ? 'text-amber' : 'text-muted'}>{displayPlc.cnc.lift ? "L_DN" : "L_UP"}</span>
+                {' | '}
+                <span className={displayPlc.cnc.clamp ? 'text-green' : 'text-muted'}>{displayPlc.cnc.clamp ? "CLMP" : "OPEN"}</span>
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%MW0 (Completed)</span>
+              <span className="plc-hud-value text-blue">{displayPlc.cnc.completed} ea</span>
+            </div>
+          </div>
+        </div>
+
+        {/* PLC #3 QC HUD */}
+        <div className={`plc-hud-card ${displayPlc.qc.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-cyber-purple)' } as React.CSSProperties}>
+          <div className="plc-hud-header">
+            <span className="plc-hud-title font-mono-tech">PLC_03 [MELSEC MC]</span>
+            <span className={`plc-hud-status-dot ${displayPlc.qc.online ? 'active' : 'inactive'}`} />
+          </div>
+          <div className="plc-hud-body font-mono-tech">
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">STATUS</span>
+              <span className={`plc-hud-value ${displayPlc.qc.online ? 'text-green' : 'text-red'}`}>
+                {displayPlc.qc.online ? "ONLINE" : "OFFLINE"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%QX0.3 (Laser sweep)</span>
+              <span className={`plc-hud-value ${displayPlc.qc.laser ? 'text-green' : 'text-muted'}`}>
+                {displayPlc.qc.laser ? "EMITTING" : "STANDBY"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%IX0.5 (Vision scan)</span>
+              <span className={`plc-hud-value ${displayPlc.qc.laser ? 'text-purple' : 'text-muted'}`}>
+                {displayPlc.qc.laser ? "SCANNING" : "WAIT"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">D0000 (Checked)</span>
+              <span className="plc-hud-value text-purple">{displayPlc.qc.completed} ea</span>
+            </div>
+          </div>
+        </div>
+
+        {/* PLC #4 Sorter HUD */}
+        <div className={`plc-hud-card ${displayPlc.sorter.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-active-green)' } as React.CSSProperties}>
+          <div className="plc-hud-header">
+            <span className="plc-hud-title font-mono-tech">PLC_04 [LS-XGT FEnet]</span>
+            <span className={`plc-hud-status-dot ${displayPlc.sorter.online ? 'active' : 'inactive'}`} />
+          </div>
+          <div className="plc-hud-body font-mono-tech">
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%MW0 (Total Out)</span>
+              <span className="plc-hud-value text-green">{displayPlc.sorter.completed} ea</span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%MW1 (Speed)</span>
+              <span className="plc-hud-value text-blue">{displayPlc.sorter.speed} mm/s</span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%PX4 (Exit Gate)</span>
+              <span className={`plc-hud-value ${displayPlc.sorter.exit ? 'text-green' : 'text-muted'}`}>
+                {displayPlc.sorter.exit ? "PASS" : "BLOCK"}
+              </span>
+            </div>
+            <div className="plc-hud-row">
+              <span className="plc-hud-label">%QX0.6 (Alarm LED)</span>
+              <span className="plc-hud-value text-green">SAFE</span>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Visual map indicators legend */}
