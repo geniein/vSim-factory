@@ -241,7 +241,7 @@ export function useSimulation() {
             const pd = packet.plcData;
             setPlcData(pd);
             
-            if (stateRef.current.isRunning) {
+            if (stateRef.current.isRunning && stateRef.current.settings.plcMode === 'runtime') {
               // Map C++ vPLC dynamic physical states directly into React animation & stats!
             // 1. CNC Machine (PLC #2) Pos (0 to 1000 mm) maps to active conveyor cargo!
             const pos = pd.cnc.pos || 0;

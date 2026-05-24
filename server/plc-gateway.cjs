@@ -48,7 +48,7 @@ const plcConnections = {
 };
 
 const plcData = {
-  feeder: { conveyor_run: false, error: false },
+  feeder: { conveyor_run: false, pos: 0, completed: 0, speed: 200, error: false },
   cnc:    { conveyor_run: false, lift_down: false, clamp_on: false, rotate_right: false, speed: 200, pos: 0, completed: 0, error: false },
   qc:     { conveyor_run: false, laser_on: false, rotate_right: false, completed: 0, error: false },
   sorter: { conveyor_run: false, completed: 0, speed: 200, error: false }
@@ -95,12 +95,23 @@ async function pollModbus() {
   if (!plcConnections.feeder || !modbusClient) return;
 
   try {
-    // Read Coils 0-8 to check %QX0.0 (Feeder push conveyor)
+    // 1. Read Coils 0-8 to check %QX0.0 (Feeder push conveyor)
     const resp = await modbusClient.readCoils(0, 8);
     const coils = resp.response.body.valuesAsArray;
     
     plcData.feeder.conveyor_run = coils[0] || false;
     plcData.feeder.error = coils[6] || false;
+
+    // 2. Read Holding Registers 0-2 (completed, speed)
+    const holdingResp = await modbusClient.readHoldingRegisters(0, 2);
+    const holdingRegs = holdingResp.response.body.valuesAsArray;
+    plcData.feeder.completed = holdingRegs[0] || 0;
+    plcData.feeder.speed = holdingRegs[1] || 200;
+
+    // 3. Read Input Registers 0-1 (pos)
+    const inputResp = await modbusClient.readInputRegisters(0, 1);
+    const inputRegs = inputResp.response.body.valuesAsArray;
+    plcData.feeder.pos = inputRegs[0] || 0;
   } catch (err) {
     // Silent fail on polling error to avoid crash
   }
@@ -319,13 +330,115 @@ function pollXGT() {
 }
 
 // ==========================================
-// 8. 100ms 폴링 통합 루프 (60fps 데이터 갱신)
+// 8. 100ms 폴링 통합 루프 및 공정 연동 브릿지 (60fps 데이터 갱신)
 // ==========================================
-setInterval(() => {
+let prevFeederCompleted = -1;
+let prevCncCompleted = -1;
+let prevQcCompleted = -1;
+
+let cncChassisTriggered = false;
+let qcChassisTriggered = false;
+let sorterChassisTriggered = false;
+
+async function runProcessBridge() {
+  // ----------------------------------------------------
+  // 1. Feeder (Modbus) ➔ CNC (S7) 브릿지 연동
+  // ----------------------------------------------------
+  if (plcConnections.feeder && plcConnections.cnc) {
+    const curFeederCompleted = plcData.feeder.completed;
+    
+    // 최초 실행 시 또는 증가 시 감지
+    if (prevFeederCompleted !== -1 && curFeederCompleted > prevFeederCompleted) {
+      log('BRIDGE', `Feeder ➔ CNC: 가공 Chassis Present (%MW2=1) 주입!`, colors.magenta);
+      
+      // CNC S7 Holding Register 2 (%MW2 - Chassis Present force) 에 1 기입 (address*2 = 4)
+      s7Client.writeItems('DB1,INT4', 1, (err) => {
+        if (!err) cncChassisTriggered = true;
+      });
+    }
+    prevFeederCompleted = curFeederCompleted;
+
+    // CNC가 작동하기 시작해서 위치가 10mm를 넘어가면 트리거 신호를 0으로 회수
+    if (cncChassisTriggered && plcData.cnc.pos > 10) {
+      s7Client.writeItems('DB1,INT4', 0, (err) => {
+        if (!err) cncChassisTriggered = false;
+      });
+    }
+  }
+
+  // ----------------------------------------------------
+  // 2. CNC (S7) ➔ QC (MC) 브릿지 연동
+  // ----------------------------------------------------
+  if (plcConnections.cnc && plcConnections.qc && mcSocket) {
+    const curCncCompleted = plcData.cnc.completed;
+    if (prevCncCompleted !== -1 && curCncCompleted > prevCncCompleted) {
+      log('BRIDGE', `CNC ➔ QC: 비전 Chassis Present (MC D2=1) 주입!`, colors.magenta);
+      
+      // QC (MC) Device D2 (%MW2 - Chassis Present force) 에 1 기입
+      const header = Buffer.from([
+        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x02, 0x00, 0x00, 0xA8, 0x01, 0x00
+      ]);
+      const valBuf = Buffer.from([1, 0]);
+      mcSocket.write(Buffer.concat([header, valBuf]));
+      qcChassisTriggered = true;
+    }
+    prevCncCompleted = curCncCompleted;
+
+    // QC가 감지해서 CNC 위치가 510mm를 넘어가면 트리거를 0으로 자진 회수
+    if (qcChassisTriggered && plcData.cnc.pos > 510) {
+      const header = Buffer.from([
+        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x02, 0x00, 0x00, 0xA8, 0x01, 0x00
+      ]);
+      const valBuf = Buffer.from([0, 0]);
+      mcSocket.write(Buffer.concat([header, valBuf]));
+      qcChassisTriggered = false;
+    }
+  }
+
+  // ----------------------------------------------------
+  // 3. QC (MC) ➔ Sorter (XGT) 브릿지 연동
+  // ----------------------------------------------------
+  if (plcConnections.qc && plcConnections.sorter && xgtSocket) {
+    const curQcCompleted = plcData.qc.completed;
+    if (prevQcCompleted !== -1 && curQcCompleted > prevQcCompleted) {
+      log('BRIDGE', `QC ➔ Sorter: 분류 Chassis Present (XGT %MW2=1) 주입!`, colors.magenta);
+      
+      // Sorter (XGT) %MW2 (%MW2 - Chassis Present force) 에 1 기입
+      const header = Buffer.from([
+        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, // "LSIS-XGT"
+        0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+      ]);
+      const body = Buffer.from([
+        0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x32, // "%MW2"
+        0x02, 0x00, 1, 0
+      ]);
+      xgtSocket.write(Buffer.concat([header, body]));
+      sorterChassisTriggered = true;
+    }
+    prevQcCompleted = curQcCompleted;
+
+    // Sorter가 동작하여 완료가 발생하거나 5초 뒤 강제 회수
+    if (sorterChassisTriggered && plcData.sorter.completed > curQcCompleted) {
+      const header = Buffer.from([
+        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, // "LSIS-XGT"
+        0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+      ]);
+      const body = Buffer.from([
+        0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x32, // "%MW2"
+        0x02, 0x00, 0, 0
+      ]);
+      xgtSocket.write(Buffer.concat([header, body]));
+      sorterChassisTriggered = false;
+    }
+  }
+}
+
+setInterval(async () => {
   pollModbus();
   pollS7();
   pollMC();
   pollXGT();
+  await runProcessBridge();
   broadcastData();
 }, 100);
 
