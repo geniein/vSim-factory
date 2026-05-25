@@ -13,13 +13,19 @@ function App() {
     machines,
     stats,
     plcData,
+    dynamicStageCount,
+    setDynamicStageCount,
+    dynamicPlcsData,
+    changeMode,
+    applyDynamicStageCount,
     setSettings,
     startSimulation,
     pauseSimulation,
     resetSimulation,
     setSystemSpeed,
     handleSpeedUpdate,
-    feedMaterial
+    feedMaterial,
+    stopAllPlcs
   } = useSimulation();
 
   return (
@@ -34,6 +40,11 @@ function App() {
         onReset={resetSimulation}
         onSpeedChange={setSystemSpeed}
         onFeedMaterial={feedMaterial}
+        onModeChange={changeMode}
+        dynamicStageCount={dynamicStageCount}
+        onDynamicStageCountChange={setDynamicStageCount}
+        onApplyDynamicStageCount={applyDynamicStageCount}
+        onStopPlcs={stopAllPlcs}
       />
 
       {/* Main 3-column dashboard grid */}
@@ -53,6 +64,8 @@ function App() {
           isRunning={isRunning}
           plcData={plcData}
           plcConnections={stats.plcConnections || { feeder: false, cnc: false, qc: false, sorter: false }}
+          dynamicStageCount={dynamicStageCount}
+          dynamicPlcsData={dynamicPlcsData}
         />
 
         {/* Right side statistical cards and logging terminal console */}

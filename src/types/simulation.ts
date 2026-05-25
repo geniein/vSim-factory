@@ -12,6 +12,7 @@ export type MachineStatus = 'idle' | 'processing' | 'blocked' | 'error';
 
 export interface Item {
   id: string;
+  serialNo?: string;
   spawnTime: number;
   status: ItemStatus;
   progress: number; // 0 to 1
@@ -36,7 +37,7 @@ export interface SimulationSettings {
   processingTime: number; // seconds a machine takes to process one item
   defectRate: number; // probability (0-100) of item being defective
   systemSpeed: number; // speed factor (0.5x, 1x, 2x, 4x) for simulation clock
-  plcMode: 'emulated' | 'runtime'; // 'emulated' for browser-only, 'runtime' for vPLC C++ runtime
+  plcMode: 'emulated' | 'runtime' | 'dynamic'; // 'emulated' for browser-only, 'runtime' for vPLC C++, 'dynamic' for dynamic N-stage vPLC
 }
 
 export interface LogMessage {

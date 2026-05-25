@@ -1,21 +1,21 @@
 #!/bin/bash
 
 # ==============================================================================
-# vPLC-Runtime Multi-Instance Manager Script
+# vPLC-Runtime Dynamic Multi-Instance Manager Script
 # ==============================================================================
-# 이 스크립트는 4개의 가상 PLC 인스턴스를 포트 충돌 없이 기동 및 종료 제어합니다.
+# 이 스크립트는 N개(3~20개)의 가상 PLC 인스턴스를 이기종 프로토콜 순환 배치로 구동합니다.
 # ==============================================================================
 
 FACTORY_DIR="$(cd "$(dirname "$0")" && pwd)"
 VPLC_DIR="$(cd "$FACTORY_DIR/../vPLC-runtime" && pwd)"
-PID_FILE="$FACTORY_DIR/vplc.pids"
+PID_FILE="$FACTORY_DIR/vplc-dynamic.pids"
 LOG_DIR="$FACTORY_DIR/logs"
 
 show_help() {
-    echo "Usage: ./vplc-run.sh [start|stop|status]"
-    echo "  start   : C++ 소스를 컴파일하고 4대의 이기종 프로토콜 PLC를 포트 오프셋으로 기동"
-    echo "  stop    : 가동 중인 4대의 가상 PLC 프로세스를 일괄 소멸 종료"
-    echo "  status  : 현재 백그라운드 구동 중인 PLC 프로세스 상태 모니터링"
+    echo "Usage: ./vplc-dynamic-run.sh [start|stop|status] [count]"
+    echo "  start [N] : C++ 소스를 빌드하고 N대(3~20)의 이기종 순환 프로토콜 PLC를 포트 오프셋으로 기동"
+    echo "  stop      : 현재 백그라운드 구동 중인 모든 동적 가상 PLC 프로세스 정지"
+    echo "  status    : 현재 동적 가상 PLC 프로세스 상태 모니터링"
 }
 
 compile_plc() {
@@ -89,7 +89,7 @@ compile_plc() {
         
         echo "[Build] 감지된 컴파일러: $COMPILER (OS: $OS_NAME)"
         
-        # 메인 바이너리 빌드 (새로 추가된 PlcTagManager 및 WebServer 포함)
+        # 메인 바이너리 빌드
         $COMPILER -std=c++17 -O3 -pthread \
             src/main.cpp \
             src/core/PlcMemory.cpp \
@@ -126,8 +126,20 @@ compile_plc() {
 }
 
 start_plcs() {
+    COUNT=$1
+    if [ -z "$COUNT" ]; then
+        COUNT=8
+    fi
+
+    # 3 ~ 20 범위 보정
+    if [ "$COUNT" -lt 3 ]; then
+        COUNT=3
+    elif [ "$COUNT" -gt 20 ]; then
+        COUNT=20
+    fi
+
     if [ -f "$PID_FILE" ]; then
-        echo "⚠️ 경고: 이미 가동 중인 vPLC 정보가 기록되어 있습니다. 먼저 stop을 실행해 주십시오."
+        echo "⚠️ 경고: 이미 가동 중인 가변 vPLC 정보가 기록되어 있습니다. 먼저 stop을 실행해 주십시오."
         status_plcs
         return
     fi
@@ -138,66 +150,78 @@ start_plcs() {
     mkdir -p "$LOG_DIR"
     echo ""
     echo "--------------------------------------------------------"
-    echo "🚀 2단계: 4대의 가상 PLC 분산 네트워크 일괄 가동 개시..."
+    echo "🚀 2단계: ${COUNT}대의 가변 이기종 가상 PLC 분산 가동 개시..."
     echo "--------------------------------------------------------"
     
-    # 1. PLC #1: 투입 공정 (Modbus TCP)
-    # 포트: 5020 + 10 = 5030
-    echo "[Start] PLC #1: 투입기 (Feeder) 가동 -> Modbus TCP (Port 5030)"
-    cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p modbus -o 10 assembly > "$LOG_DIR/plc1_feeder.log" 2>&1 < /dev/null &
-    PLC1_PID=$!
-    cd "$FACTORY_DIR" || exit 1
+    rm -f "$PID_FILE"
     
-    # 2. PLC #2: CNC 가공 공정 (지멘스 S7)
-    # 포트: 1020 + 20 = 1040
-    echo "[Start] PLC #2: CNC가공 (CNC Mill) 가동 -> Siemens S7 (Port 1040)"
-    cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p s7 -o 20 assembly > "$LOG_DIR/plc2_cnc.log" 2>&1 < /dev/null &
-    PLC2_PID=$!
-    cd "$FACTORY_DIR" || exit 1
-    
-    # 3. PLC #3: QC 검사 공정 (미쓰비시 MC)
-    # 포트: 5011 + 30 = 5041
-    echo "[Start] PLC #3: 비전QC (QC Vision) 가동 -> MELSEC MC (Port 5041)"
-    cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p mc -o 30 assembly > "$LOG_DIR/plc3_qc.log" 2>&1 < /dev/null &
-    PLC3_PID=$!
-    cd "$FACTORY_DIR" || exit 1
-    
-    # 4. PLC #4: 출하 분류 공정 (LS Electric XGT)
-    # 포트: 2004 + 40 = 2044
-    echo "[Start] PLC #4: 출하분류 (Sorter) 가동 -> LS Electric XGT (Port 2044)"
-    cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p xgt -o 40 assembly > "$LOG_DIR/plc4_sorter.log" 2>&1 < /dev/null &
-    PLC4_PID=$!
-    cd "$FACTORY_DIR" || exit 1
-    
-    # PIDs 기록
-    echo "$PLC1_PID" > "$PID_FILE"
-    echo "$PLC2_PID" >> "$PID_FILE"
-    echo "$PLC3_PID" >> "$PID_FILE"
-    echo "$PLC4_PID" >> "$PID_FILE"
+    for ((i=1; i<=COUNT; i++)); do
+        OFFSET=$((i * 10))
+        
+        # 프로토콜 순환 배치 규칙 (Modbus ➔ S7 ➔ MC ➔ XGT)
+        PROT_IDX=$(( (i - 1) % 4 ))
+        case $PROT_IDX in
+            0)
+                PROTOCOL="modbus"
+                PORT=$((5020 + OFFSET))
+                DESC="Modbus TCP"
+                ;;
+            1)
+                PROTOCOL="s7"
+                PORT=$((1020 + OFFSET))
+                DESC="Siemens S7"
+                ;;
+            2)
+                PROTOCOL="mc"
+                PORT=$((5011 + OFFSET))
+                DESC="MELSEC MC"
+                ;;
+            3)
+                PROTOCOL="xgt"
+                PORT=$((2004 + OFFSET))
+                DESC="LS Electric XGT"
+                ;;
+        esac
+        
+        echo "[Start] PLC #$i: 공정 $i 기동 ➡️ $DESC (Port: $PORT, Offset: $OFFSET)"
+        
+        cd "$VPLC_DIR" || exit 1
+        # Embedded web server port도 충돌나지 않게 8080 + offset 형태로 전달
+        WEB_PORT=$((8080 + OFFSET))
+        
+        nohup ./vPlc -p "$PROTOCOL" -o "$OFFSET" -w "$WEB_PORT" assembly > "$LOG_DIR/plc${i}_dynamic_${PROTOCOL}.log" 2>&1 < /dev/null &
+        PLC_PID=$!
+        
+        cd "$FACTORY_DIR" || exit 1
+        
+        # PIDs 및 프로토콜 정보 저장
+        echo "$i:$PROTOCOL:$PORT:$PLC_PID" >> "$PID_FILE"
+    done
     
     echo "--------------------------------------------------------"
-    echo "🟢 4대 vPLC 분산 엔진 가동 완료 (PIDs 기록 완료)"
+    echo "🟢 ${COUNT}대 가변 이기종 vPLC 가동 완료 (PIDs 기록 완료)"
     echo "   - 로그 폴더: $LOG_DIR"
     echo "--------------------------------------------------------"
 }
 
 stop_plcs() {
     echo "--------------------------------------------------------"
-    echo "🛑 3단계: 백그라운드 가상 PLC 프로세스 일괄 소멸 정지..."
+    echo "🛑 3단계: 백그라운드 가변 가상 PLC 프로세스 일괄 정지..."
     echo "--------------------------------------------------------"
     
     if [ ! -f "$PID_FILE" ]; then
-        echo "ℹ️ 정보: 가동 중인 vPLC 정보($PID_FILE)가 존재하지 않습니다."
+        echo "ℹ️ 정보: 가동 중인 가변 vPLC 정보($PID_FILE)가 존재하지 않습니다."
         return
     fi
     
-    while IFS= read -r pid; do
+    while IFS= read -r line; do
+        if [ -z "$line" ]; then continue; fi
+        
+        # 포맷: i:protocol:port:pid
+        IFS=':' read -r idx protocol port pid <<< "$line"
+        
         if ps -p "$pid" > /dev/null; then
-            echo "[Stop] PID $pid 프로세스에 안전 종료 신호(SIGTERM) 송신..."
+            echo "[Stop] PLC #$idx (PID $pid) 안전 종료 신호(SIGTERM) 송신..."
             kill "$pid"
             
             # 2초간 유예 대기
@@ -210,49 +234,53 @@ stop_plcs() {
             
             # 미종료시 강제 종료
             if ps -p "$pid" > /dev/null; then
-                echo "⚠️ 경고: PID $pid 미반응으로 강제 종료(SIGKILL) 집행..."
+                echo "⚠️ 경고: PLC #$idx (PID $pid) 미반응으로 강제 종료(SIGKILL) 집행..."
                 kill -9 "$pid"
             fi
         else
-            echo "ℹ️ 정보: PID $pid 프로세스는 이미 종료되어 있습니다."
+            echo "ℹ️ 정보: PLC #$idx (PID $pid) 이미 종료되어 있습니다."
         fi
     done < "$PID_FILE"
     
     rm -f "$PID_FILE"
-    echo "✅ 모든 가상 PLC 인스턴스 정지 완료."
+    echo "✅ 모든 가변 가상 PLC 인스턴스 정지 완료."
     echo "--------------------------------------------------------"
 }
 
 status_plcs() {
     echo "--------------------------------------------------------"
-    echo "📊 가상 PLC 백그라운드 프로세스 동작 상태 모니터"
+    echo "📊 가변 가상 PLC 백그라운드 프로세스 동작 상태 모니터"
     echo "--------------------------------------------------------"
     
     if [ ! -f "$PID_FILE" ]; then
-        echo "🔴 대기 중: 가동 중인 백그라운드 PLC 인스턴스가 존재하지 않습니다."
+        echo "🔴 대기 중: 가동 중인 가변 PLC 인스턴스가 존재하지 않습니다."
         return
     fi
     
-    IDX=1
-    NAMES=("Feeder [Modbus]" "CNC Mill [S7]" "QC Vision [MC]" "Sorter [XGT]")
-    PORTS=("5030" "1040" "5041" "2044")
-    
-    while IFS= read -r pid; do
-        NAME=${NAMES[$((IDX-1))]}
-        PORT=${PORTS[$((IDX-1))]}
+    while IFS= read -r line; do
+        if [ -z "$line" ]; then continue; fi
+        
+        IFS=':' read -r idx protocol port pid <<< "$line"
+        
+        case $protocol in
+            "modbus") DESC="Modbus TCP" ;;
+            "s7")     DESC="Siemens S7" ;;
+            "mc")     DESC="MELSEC MC"  ;;
+            "xgt")    DESC="LS Electric XGT" ;;
+        esac
+        
         if ps -p "$pid" > /dev/null; then
-            echo -e "🟢 PLC #$IDX \033[1;32mONLINE\033[0m : $NAME (PID: $pid) ➡️ Port \033[1;36m$PORT\033[0m"
+            echo -e "🟢 PLC #$idx \033[1;32mONLINE\033[0m : $DESC (PID: $pid) ➡️ Port \033[1;36m$port\033[0m"
         else
-            echo -e "🔴 PLC #$IDX \033[1;31mOFFLINE\033[0m: $NAME (PID: $pid) ➡️ Port $PORT"
+            echo -e "🔴 PLC #$idx \033[1;31mOFFLINE\033[0m: $DESC (PID: $pid) ➡️ Port $port"
         fi
-        IDX=$((IDX+1))
     done < "$PID_FILE"
     echo "--------------------------------------------------------"
 }
 
 case "$1" in
     start)
-        start_plcs
+        start_plcs "$2"
         ;;
     stop)
         stop_plcs

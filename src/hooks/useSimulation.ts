@@ -16,6 +16,19 @@ export const PATH_COORDINATES = {
   scrapyard: { x: 740, y: 300 }
 };
 
+export const generateSerialNo = (): string => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let randStr = '';
+  for (let i = 0; i < 3; i++) {
+    randStr += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  let randNum = '';
+  for (let i = 0; i < 6; i++) {
+    randNum += Math.floor(Math.random() * 10).toString();
+  }
+  return `${randStr} ${randNum}`;
+};
+
 export function useSimulation() {
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [settings, setSettings] = useState<SimulationSettings>({
@@ -67,6 +80,9 @@ export function useSimulation() {
     sorter: { conveyor_run: false, completed: 0, speed: 200, error: false }
   });
 
+  const [dynamicStageCount, setDynamicStageCount] = useState<number>(8);
+  const [dynamicPlcsData, setDynamicPlcsData] = useState<any[]>([]);
+
   // Keep mutable references for the animation loop to prevent closure staleness
   const stateRef = useRef({
     isRunning,
@@ -74,6 +90,8 @@ export function useSimulation() {
     items,
     machines,
     stats,
+    dynamicStageCount,
+    dynamicPlcsData,
     lastTime: 0,
     spawnAccumulator: 0,
     uptimeAccumulator: 0,
@@ -90,7 +108,9 @@ export function useSimulation() {
     stateRef.current.items = items;
     stateRef.current.machines = machines;
     stateRef.current.stats = stats;
-  }, [isRunning, settings, items, machines, stats]);
+    stateRef.current.dynamicStageCount = dynamicStageCount;
+    stateRef.current.dynamicPlcsData = dynamicPlcsData;
+  }, [isRunning, settings, items, machines, stats, dynamicStageCount, dynamicPlcsData]);
 
   // Helper to add system logs safely
   const addLog = useCallback((message: string, type: LogMessage['type'] = 'info') => {
@@ -128,6 +148,8 @@ export function useSimulation() {
       addLog(
         settings.plcMode === 'runtime'
           ? 'vPLC-Runtime 연동 모드로 가상 공장 가동을 개시합니다.'
+          : settings.plcMode === 'dynamic'
+          ? `가변 멀티 공정 (${dynamicStageCount}단) 연동 모드로 가상 공장 가동을 개시합니다.`
           : '가상 에뮬레이터 모드로 가상 공장 가동을 개시합니다.',
         'info'
       );
@@ -137,9 +159,20 @@ export function useSimulation() {
         const speedValue = Math.round(settings.conveyorSpeed * 150); // Scale speed (e.g. 1.5x -> 225)
         writePlcRegister('cnc', 1, speedValue);
         writePlcRegister('sorter', 1, speedValue);
+      } else if (settings.plcMode === 'dynamic' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        // Sync speed for dynamic PLCs
+        const speedValue = Math.round(settings.conveyorSpeed * 150);
+        for (let i = 1; i <= dynamicStageCount; i++) {
+          wsRef.current.send(JSON.stringify({
+            type: 'write_dynamic_register',
+            idx: i,
+            address: 1,
+            value: speedValue
+          }));
+        }
       }
     }
-  }, [isRunning, settings.plcMode, settings.conveyorSpeed, writePlcRegister, addLog]);
+  }, [isRunning, settings.plcMode, settings.conveyorSpeed, dynamicStageCount, writePlcRegister, addLog]);
 
   const pauseSimulation = useCallback(() => {
     if (isRunning) {
@@ -151,6 +184,7 @@ export function useSimulation() {
   const resetSimulation = useCallback(() => {
     setIsRunning(false);
     setItems([]);
+    setDynamicPlcsData([]);
     setMachines([
       {
         id: 'm1',
@@ -196,11 +230,57 @@ export function useSimulation() {
     addLog(`배속이 ${speed}x 로 조정되었습니다.`, 'info');
   }, [addLog]);
 
+  // Mode change handler
+  const changeMode = useCallback((mode: 'emulated' | 'runtime' | 'dynamic') => {
+    setSettings(prev => ({ ...prev, plcMode: mode }));
+    setIsRunning(false);
+    setItems([]);
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (mode === 'dynamic') {
+        wsRef.current.send(JSON.stringify({ type: 'start_dynamic', count: dynamicStageCount }));
+      } else {
+        wsRef.current.send(JSON.stringify({ type: 'stop_dynamic' }));
+      }
+    }
+    
+    addLog(`동작 모드가 [${
+      mode === 'emulated' ? '브라우저 에뮬' : mode === 'runtime' ? '기본 고정 공정' : '가변 멀티 공정'
+    }] 모드로 변경되었습니다.`, 'info');
+  }, [dynamicStageCount, addLog]);
+
+  // Apply dynamic stage count action
+  const applyDynamicStageCount = useCallback(() => {
+    setIsRunning(false);
+    setItems([]);
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'start_dynamic', count: dynamicStageCount }));
+      addLog(`가변 멀티 vPLC 프로세스를 ${dynamicStageCount}대로 갱신 재부팅합니다...`, 'warning');
+    } else {
+      addLog('중계 게이트웨이 소켓이 연결되어 있지 않아 가변 공정을 설정할 수 없습니다.', 'error');
+    }
+  }, [dynamicStageCount, addLog]);
+
+  // Explicit stop of all C++ vPLCs via gateway
+  const stopAllPlcs = useCallback(() => {
+    setIsRunning(false);
+    setItems([]);
+    setDynamicPlcsData([]);
+    
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'stop_dynamic' }));
+      addLog('🛑 [수동 정지 명령] 가변/고정 C++ vPLC 프로세스 일괄 정지 지시 송신 완료 (./vplc-dynamic-run.sh stop)', 'error');
+    } else {
+      addLog('중계 게이트웨이 소켓 연결이 오프라인 상태입니다.', 'error');
+    }
+  }, [addLog]);
+
   // ==============================================================================
   // 1. WEBSOCKET HIL CONNECTION LIFECYCLE (vPLC-Runtime Mode)
   // ==============================================================================
   useEffect(() => {
-    if (settings.plcMode !== 'runtime') {
+    if (settings.plcMode === 'emulated') {
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
@@ -208,7 +288,7 @@ export function useSimulation() {
       return;
     }
 
-    addLog('Modbus/S7/MC/XGT 중계 게이트웨이(ws://localhost:4546) 연결 시도 중...', 'info');
+    addLog('Modbus/S7/MC/XGT 통합 게이트웨이(ws://localhost:4546) 연결 시도 중...', 'info');
 
     const connectWs = () => {
       if (settings.plcMode !== 'runtime') return;
@@ -219,10 +299,13 @@ export function useSimulation() {
       ws.onopen = () => {
         addLog('🔌 중계 게이트웨이 소켓 연결에 성공했습니다.', 'success');
         
-        // Sync speed setting to PLCs
-        const speedValue = Math.round(settings.conveyorSpeed * 150);
-        writePlcRegister('cnc', 1, speedValue);
-        writePlcRegister('sorter', 1, speedValue);
+        if (stateRef.current.settings.plcMode === 'dynamic') {
+          ws.send(JSON.stringify({ type: 'start_dynamic', count: stateRef.current.dynamicStageCount }));
+        } else {
+          const speedValue = Math.round(stateRef.current.settings.conveyorSpeed * 150);
+          writePlcRegister('cnc', 1, speedValue);
+          writePlcRegister('sorter', 1, speedValue);
+        }
       };
 
       ws.onmessage = (event) => {
@@ -254,6 +337,7 @@ export function useSimulation() {
               const y = PATH_COORDINATES.spawn.y;
               activeItems.push({
                 id: 'ITEM-FEEDER',
+                serialNo: pd.feeder.serial,
                 spawnTime: Date.now(),
                 status: 'conveyor1',
                 progress,
@@ -276,6 +360,7 @@ export function useSimulation() {
                 
                 activeItems.push({
                   id: 'ITEM-CNC-WORK',
+                  serialNo: pd.cnc.serial,
                   spawnTime: Date.now(),
                   status: pd.cnc.clamp_on ? 'processing' : 'conveyor1',
                   progress,
@@ -292,6 +377,7 @@ export function useSimulation() {
                 const y = PATH_COORDINATES.machineExit.y;
                 activeItems.push({
                   id: 'ITEM-CNC-OUT',
+                  serialNo: pd.cnc.serial,
                   spawnTime: Date.now(),
                   status: 'conveyor2',
                   progress,
@@ -307,6 +393,7 @@ export function useSimulation() {
             if (pd.qc.laser_on || pd.qc.conveyor_run) {
               activeItems.push({
                 id: 'ITEM-QC-CHECK',
+                serialNo: pd.qc.serial,
                 spawnTime: Date.now(),
                 status: pd.qc.laser_on ? 'inspecting' : 'conveyor2',
                 progress: 0.5,
@@ -324,6 +411,7 @@ export function useSimulation() {
               const dy = PATH_COORDINATES.warehouse.y - PATH_COORDINATES.inspectExit.y;
               activeItems.push({
                 id: 'ITEM-SORTER-OUT',
+                serialNo: pd.sorter.serial,
                 spawnTime: Date.now(),
                 status: 'conveyor3',
                 progress,
@@ -394,6 +482,30 @@ export function useSimulation() {
             });
             }
           }
+          
+          else if (packet.type === 'plc_dynamic_data') {
+            const count = packet.stageCount;
+            const plcs = packet.plcs;
+            setDynamicPlcsData(plcs);
+            
+            if (stateRef.current.isRunning && stateRef.current.settings.plcMode === 'dynamic') {
+              const onlineCount = plcs.filter((p: any) => p.online).length;
+              const lastPlc = plcs[plcs.length - 1];
+              const firstPlc = plcs[0];
+              
+              const totalCompleted = lastPlc ? (lastPlc.data.completed || 0) : 0;
+              const totalSpawned = firstPlc ? (firstPlc.data.conveyor_run ? totalCompleted + 1 : totalCompleted) : 0;
+              
+              setStats(prev => ({
+                ...prev,
+                totalSpawned,
+                totalCompleted,
+                totalProcessed: plcs.reduce((sum: number, p: any) => sum + (p.data.completed || 0), 0),
+                oee: count > 0 ? Math.round((onlineCount / count) * 100) : 100,
+                bottleneck: onlineCount < count ? '일부 가변 vPLC의 통신 단선 발생' : '모든 이기종 가변 공정 정상 연동 구동 중'
+              }));
+            }
+          }
         } catch (err) {
           // Parse err silently
         }
@@ -452,9 +564,11 @@ export function useSimulation() {
       // Standalone Emulated Mode: Spawn item immediately
       const rawId = Math.random().toString(36).substring(2, 6).toUpperCase();
       const itemId = `ITEM-${rawId}`;
+      const serial = generateSerialNo();
       const time = performance.now();
       const newItem: Item = {
         id: itemId,
+        serialNo: serial,
         spawnTime: time,
         status: 'conveyor1',
         progress: 0,
@@ -464,7 +578,7 @@ export function useSimulation() {
         history: [{ status: 'spawned', time }]
       };
       setItems(prev => [...prev, newItem]);
-      addLog(`[수동 투입 완료] ${itemId} 원자재 즉시 투입`, 'info');
+      addLog(`[수동 투입 완료] ${itemId} 원자재 즉시 투입 (시리얼: ${serial})`, 'info');
     }
   }, [writePlcRegister, addLog]);
 
@@ -509,8 +623,10 @@ export function useSimulation() {
         if (canSpawn) {
           const rawId = Math.random().toString(36).substring(2, 6).toUpperCase();
           const itemId = `ITEM-${rawId}`;
+          const serial = generateSerialNo();
           spawnedItem = {
             id: itemId,
+            serialNo: serial,
             spawnTime: time,
             status: 'conveyor1',
             progress: 0,
@@ -831,6 +947,11 @@ export function useSimulation() {
     machines,
     stats,
     plcData,
+    dynamicStageCount,
+    setDynamicStageCount,
+    dynamicPlcsData,
+    changeMode,
+    applyDynamicStageCount,
     setSettings,
     startSimulation,
     pauseSimulation,
@@ -838,6 +959,7 @@ export function useSimulation() {
     setSystemSpeed,
     handleSpeedUpdate,
     feedMaterial,
+    stopAllPlcs,
     addLog
   };
 }

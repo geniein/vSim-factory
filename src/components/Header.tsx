@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, RotateCcw, Factory, Clock, Zap, Package } from 'lucide-react';
+import { Play, Pause, RotateCcw, Factory, Clock, Zap, Package, Layers, Power } from 'lucide-react';
 import type { SimulationSettings } from '../types/simulation';
 
 interface HeaderProps {
@@ -11,6 +11,11 @@ interface HeaderProps {
   onReset: () => void;
   onSpeedChange: (speed: number) => void;
   onFeedMaterial: () => void;
+  onModeChange: (mode: 'emulated' | 'runtime' | 'dynamic') => void;
+  dynamicStageCount: number;
+  onDynamicStageCountChange: (count: number) => void;
+  onApplyDynamicStageCount: () => void;
+  onStopPlcs: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,7 +26,12 @@ export const Header: React.FC<HeaderProps> = ({
   onPause,
   onReset,
   onSpeedChange,
-  onFeedMaterial
+  onFeedMaterial,
+  onModeChange,
+  dynamicStageCount,
+  onDynamicStageCountChange,
+  onApplyDynamicStageCount,
+  onStopPlcs
 }) => {
   // Format uptime into mm:ss
   const formatUptime = (seconds: number) => {
@@ -45,6 +55,64 @@ export const Header: React.FC<HeaderProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Mode Selector */}
+      <div style={{ display: 'flex', gap: '0.25rem', background: 'rgba(255,255,255,0.02)', padding: '0.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
+        <button
+          onClick={() => onModeChange('emulated')}
+          className={`speed-btn ${settings.plcMode === 'emulated' ? 'active' : ''}`}
+          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '80px' }}
+        >
+          브라우저 에뮬
+        </button>
+        <button
+          onClick={() => onModeChange('runtime')}
+          className={`speed-btn ${settings.plcMode === 'runtime' ? 'active' : ''}`}
+          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '120px' }}
+        >
+          기본 고정 공정 (vPLC)
+        </button>
+        <button
+          onClick={() => onModeChange('dynamic')}
+          className={`speed-btn ${settings.plcMode === 'dynamic' ? 'active' : ''}`}
+          style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem', minWidth: '120px' }}
+        >
+          가변 멀티 공정 (vPLC)
+        </button>
+      </div>
+
+      {/* Dynamic Stage Count Slider (Only visible in dynamic mode) */}
+      {settings.plcMode === 'dynamic' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(56, 189, 248, 0.08)', padding: '0.25rem 0.6rem', borderRadius: '8px', border: '1px solid rgba(56, 189, 248, 0.2)' }}>
+          <Layers size={14} style={{ color: 'var(--color-cyber-blue)' }} />
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-cyber-blue)', fontWeight: 600 }}>공정 수:</span>
+          <input
+            type="range"
+            min={3}
+            max={20}
+            value={dynamicStageCount}
+            onChange={(e) => onDynamicStageCountChange(parseInt(e.target.value, 10))}
+            style={{ width: '80px', accentColor: 'var(--color-cyber-blue)', cursor: 'pointer' }}
+          />
+          <span className="font-mono-tech" style={{ fontSize: '0.75rem', color: '#fff', width: '32px', textAlign: 'center', fontWeight: 600 }}>
+            {dynamicStageCount}단
+          </span>
+          <button
+            onClick={onApplyDynamicStageCount}
+            className="control-btn"
+            style={{
+              padding: '2px 8px',
+              fontSize: '0.7rem',
+              borderColor: 'var(--color-cyber-blue)',
+              background: 'rgba(56, 189, 248, 0.15)',
+              color: '#fff',
+              boxShadow: '0 0 8px rgba(56, 189, 248, 0.2)'
+            }}
+          >
+            적용
+          </button>
+        </div>
+      )}
 
       <div className="header-controls">
         {/* Status indicator badge */}
@@ -93,17 +161,19 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           ) : (
             <>
-              <button
-                className="control-btn"
-                onClick={onFeedMaterial}
-                style={{
-                  borderColor: 'var(--color-cyber-purple)',
-                  background: 'rgba(168, 85, 247, 0.1)',
-                  boxShadow: '0 0 10px rgba(168, 85, 247, 0.15)'
-                }}
-              >
-                <Package size={16} style={{ color: 'var(--color-cyber-purple)' }} /> 원자재 투입
-              </button>
+              {settings.plcMode !== 'dynamic' && (
+                <button
+                  className="control-btn"
+                  onClick={onFeedMaterial}
+                  style={{
+                    borderColor: 'var(--color-cyber-purple)',
+                    background: 'rgba(168, 85, 247, 0.1)',
+                    boxShadow: '0 0 10px rgba(168, 85, 247, 0.15)'
+                  }}
+                >
+                  <Package size={16} style={{ color: 'var(--color-cyber-purple)' }} /> 원자재 투입
+                </button>
+              )}
               <button className="control-btn" onClick={onPause} style={{ borderColor: 'var(--color-warning-amber)' }}>
                 <Pause size={16} style={{ color: 'var(--color-warning-amber)' }} /> 일시정지
               </button>
@@ -113,6 +183,23 @@ export const Header: React.FC<HeaderProps> = ({
           <button className="control-btn" onClick={onReset} title="시뮬레이션 초기화">
             <RotateCcw size={16} /> 리셋
           </button>
+
+          {settings.plcMode !== 'emulated' && (
+            <button
+              className="control-btn"
+              onClick={onStopPlcs}
+              style={{
+                borderColor: '#ef4444',
+                background: 'rgba(239, 68, 68, 0.12)',
+                color: '#fca5a5',
+                boxShadow: '0 0 10px rgba(239, 68, 68, 0.25)',
+                fontWeight: 600
+              }}
+              title="C++ vPLC 프로세스 강제 종료 및 소멸 (./vplc-dynamic-run.sh stop)"
+            >
+              <Power size={16} style={{ color: '#ef4444' }} /> PLC OFF
+            </button>
+          )}
         </div>
       </div>
     </header>

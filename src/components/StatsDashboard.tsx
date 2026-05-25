@@ -5,7 +5,7 @@ import type { SimulationStats, Machine } from '../types/simulation';
 interface StatsDashboardProps {
   stats: SimulationStats;
   machines: Machine[];
-  plcMode: 'emulated' | 'runtime';
+  plcMode: 'emulated' | 'runtime' | 'dynamic';
 }
 
 export const StatsDashboard: React.FC<StatsDashboardProps> = ({ stats, machines, plcMode }) => {
