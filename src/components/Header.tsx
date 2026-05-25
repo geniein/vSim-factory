@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Pause, RotateCcw, Factory, Clock, Zap } from 'lucide-react';
+import { Play, Pause, RotateCcw, Factory, Clock, Zap, Package } from 'lucide-react';
 import type { SimulationSettings } from '../types/simulation';
 
 interface HeaderProps {
@@ -10,6 +10,7 @@ interface HeaderProps {
   onPause: () => void;
   onReset: () => void;
   onSpeedChange: (speed: number) => void;
+  onFeedMaterial: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,7 +20,8 @@ export const Header: React.FC<HeaderProps> = ({
   onStart,
   onPause,
   onReset,
-  onSpeedChange
+  onSpeedChange,
+  onFeedMaterial
 }) => {
   // Format uptime into mm:ss
   const formatUptime = (seconds: number) => {
@@ -83,16 +85,29 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Start / Pause / Reset Control buttons */}
+        {/* Start / Pause / Reset / Feed Control buttons */}
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           {!isRunning ? (
             <button className="control-btn active" onClick={onStart}>
               <Play size={16} fill="currentColor" /> 가동
             </button>
           ) : (
-            <button className="control-btn" onClick={onPause} style={{ borderColor: 'var(--color-warning-amber)' }}>
-              <Pause size={16} style={{ color: 'var(--color-warning-amber)' }} /> 일시정지
-            </button>
+            <>
+              <button
+                className="control-btn"
+                onClick={onFeedMaterial}
+                style={{
+                  borderColor: 'var(--color-cyber-purple)',
+                  background: 'rgba(168, 85, 247, 0.1)',
+                  boxShadow: '0 0 10px rgba(168, 85, 247, 0.15)'
+                }}
+              >
+                <Package size={16} style={{ color: 'var(--color-cyber-purple)' }} /> 원자재 투입
+              </button>
+              <button className="control-btn" onClick={onPause} style={{ borderColor: 'var(--color-warning-amber)' }}>
+                <Pause size={16} style={{ color: 'var(--color-warning-amber)' }} /> 일시정지
+              </button>
+            </>
           )}
 
           <button className="control-btn" onClick={onReset} title="시뮬레이션 초기화">

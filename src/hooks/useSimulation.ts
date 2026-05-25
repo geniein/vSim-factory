@@ -242,53 +242,94 @@ export function useSimulation() {
             setPlcData(pd);
             
             if (stateRef.current.isRunning && stateRef.current.settings.plcMode === 'runtime') {
-              // Map C++ vPLC dynamic physical states directly into React animation & stats!
-            // 1. CNC Machine (PLC #2) Pos (0 to 1000 mm) maps to active conveyor cargo!
-            const pos = pd.cnc.pos || 0;
+            // Map C++ vPLC dynamic physical states directly into React animation & stats!
             const activeItems: Item[] = [];
 
-            if (pos > 0 && pos < 1000) {
-              let itemStatus: ItemStatus = 'conveyor1';
-              let progress = 0;
-              let x = PATH_COORDINATES.spawn.x;
-              let y = PATH_COORDINATES.spawn.y;
-
-              if (pos <= 500) {
-                // Conveyor 1: moving from Spawn (50, 200) to CNC entrance (230, 200)
-                itemStatus = 'conveyor1';
-                progress = pos / 500;
-                const dx = PATH_COORDINATES.machineEntrance.x - PATH_COORDINATES.spawn.x;
-                x = PATH_COORDINATES.spawn.x + dx * progress;
-                y = PATH_COORDINATES.spawn.y;
-              } else if (pos > 500) {
-                // Conveyor 2: moving from CNC Exit (330, 200) to Sorter / QC (470, 200)
-                itemStatus = 'conveyor2';
-                progress = (pos - 500) / 500;
-                const dx = PATH_COORDINATES.inspectEntrance.x - PATH_COORDINATES.machineExit.x;
-                x = PATH_COORDINATES.machineExit.x + dx * progress;
-                y = PATH_COORDINATES.machineExit.y;
-              }
-
+            // 1. Feeder (PLC #1) Cargo: Spawn -> CNC Entrance
+            const feederPos = pd.feeder.pos || 0;
+            if (pd.feeder.conveyor_run || feederPos > 0) {
+              const progress = feederPos / 1000;
+              const dx = PATH_COORDINATES.machineEntrance.x - PATH_COORDINATES.spawn.x;
+              const x = PATH_COORDINATES.spawn.x + dx * progress;
+              const y = PATH_COORDINATES.spawn.y;
               activeItems.push({
-                id: 'ITEM-PLC',
+                id: 'ITEM-FEEDER',
                 spawnTime: Date.now(),
-                status: itemStatus,
+                status: 'conveyor1',
                 progress,
                 quality: 'unknown',
                 x,
                 y,
                 history: []
               });
-            } else if (pos === 500) {
-              // Exact 500mm means processing in CNC Machine (M1)
+            }
+
+            // 2. CNC Machine (PLC #2) Cargo: Processing or Conveyor 2 (CNC Exit -> QC Entrance)
+            const cncPos = pd.cnc.pos || 0;
+            if (pd.cnc.conveyor_run || cncPos > 0) {
+              if (cncPos <= 500) {
+                // Smoothly glide from CNC Entrance (230) to Spindle Center (280)
+                const progress = cncPos / 500;
+                const dx = PATH_COORDINATES.machine.x - PATH_COORDINATES.machineEntrance.x;
+                const x = PATH_COORDINATES.machineEntrance.x + dx * progress;
+                const y = PATH_COORDINATES.machineEntrance.y;
+                
+                activeItems.push({
+                  id: 'ITEM-CNC-WORK',
+                  spawnTime: Date.now(),
+                  status: pd.cnc.clamp_on ? 'processing' : 'conveyor1',
+                  progress,
+                  quality: 'unknown',
+                  x,
+                  y,
+                  history: []
+                });
+              } else {
+                // Conveyor 2: CNC Exit -> QC Entrance
+                const progress = (cncPos - 500) / 500;
+                const dx = PATH_COORDINATES.inspectEntrance.x - PATH_COORDINATES.machineExit.x;
+                const x = PATH_COORDINATES.machineExit.x + dx * progress;
+                const y = PATH_COORDINATES.machineExit.y;
+                activeItems.push({
+                  id: 'ITEM-CNC-OUT',
+                  spawnTime: Date.now(),
+                  status: 'conveyor2',
+                  progress,
+                  quality: 'unknown',
+                  x,
+                  y,
+                  history: []
+                });
+              }
+            }
+
+            // 3. QC (PLC #3) Cargo: Inspecting in M2
+            if (pd.qc.laser_on || pd.qc.conveyor_run) {
               activeItems.push({
-                id: 'ITEM-PLC',
+                id: 'ITEM-QC-CHECK',
                 spawnTime: Date.now(),
-                status: 'processing',
+                status: pd.qc.laser_on ? 'inspecting' : 'conveyor2',
                 progress: 0.5,
                 quality: 'unknown',
-                x: PATH_COORDINATES.machine.x,
-                y: PATH_COORDINATES.machine.y,
+                x: PATH_COORDINATES.inspect.x,
+                y: PATH_COORDINATES.inspect.y,
+                history: []
+              });
+            }
+
+            // 4. Sorter (PLC #4) Cargo: Warehouse transit
+            if (pd.sorter.conveyor_run) {
+              const progress = 0.5;
+              const dx = PATH_COORDINATES.warehouse.x - PATH_COORDINATES.inspectExit.x;
+              const dy = PATH_COORDINATES.warehouse.y - PATH_COORDINATES.inspectExit.y;
+              activeItems.push({
+                id: 'ITEM-SORTER-OUT',
+                spawnTime: Date.now(),
+                status: 'conveyor3',
+                progress,
+                quality: 'good',
+                x: PATH_COORDINATES.inspectExit.x + dx * progress,
+                y: PATH_COORDINATES.inspectExit.y + dy * progress,
                 history: []
               });
             }
@@ -298,22 +339,23 @@ export function useSimulation() {
             // 2. Map CNC Machine state based on PLC clamp/spindle indicators
             setMachines(prev => prev.map(m => {
               if (m.id === 'm1') {
-                const isBlocked = pd.cnc.clamp_on && !pd.cnc.conveyor_run;
-                const status = isBlocked ? 'blocked' : (pd.cnc.conveyor_run || pd.cnc.lift_down) ? 'processing' : 'idle';
+                const isProcessing = pd.cnc.conveyor_run || pd.cnc.lift_down || pd.cnc.clamp_on;
+                const status = pd.cnc.error ? 'blocked' : isProcessing ? 'processing' : 'idle';
                 return {
                   ...m,
                   status,
                   processedCount: pd.cnc.completed || 0,
-                  currentItemId: pd.cnc.conveyor_run ? 'ITEM-PLC' : null
+                  currentItemId: isProcessing ? 'ITEM-PLC' : null
                 };
               } else if (m.id === 'm2') {
                 // QC vision inspector status based on MC laser_on
-                const status = pd.qc.laser_on ? 'processing' : 'idle';
+                const isProcessing = pd.qc.laser_on || pd.qc.conveyor_run;
+                const status = pd.qc.error ? 'blocked' : isProcessing ? 'processing' : 'idle';
                 return {
                   ...m,
                   status,
                   processedCount: pd.qc.completed || 0,
-                  currentItemId: pd.qc.laser_on ? 'ITEM-PLC' : null
+                  currentItemId: isProcessing ? 'ITEM-PLC' : null
                 };
               }
               return m;
@@ -396,6 +438,34 @@ export function useSimulation() {
 
       return nextSettings;
     });
+  }, [writePlcRegister, addLog]);
+
+  // Manually feed raw material/chassis
+  const feedMaterial = useCallback(() => {
+    const isLive = stateRef.current.settings.plcMode === 'runtime';
+    
+    if (isLive) {
+      // Live HIL Mode: Send %MW2 = 1 force present signal to Feeder PLC #1
+      writePlcRegister('feeder', 2, 1);
+      addLog('[수동 투입 지시] PLC_01 Feeder에 Chassis Present 강제 주입 (%MW2 = 1)', 'info');
+    } else {
+      // Standalone Emulated Mode: Spawn item immediately
+      const rawId = Math.random().toString(36).substring(2, 6).toUpperCase();
+      const itemId = `ITEM-${rawId}`;
+      const time = performance.now();
+      const newItem: Item = {
+        id: itemId,
+        spawnTime: time,
+        status: 'conveyor1',
+        progress: 0,
+        quality: 'unknown',
+        x: PATH_COORDINATES.spawn.x,
+        y: PATH_COORDINATES.spawn.y,
+        history: [{ status: 'spawned', time }]
+      };
+      setItems(prev => [...prev, newItem]);
+      addLog(`[수동 투입 완료] ${itemId} 원자재 즉시 투입`, 'info');
+    }
   }, [writePlcRegister, addLog]);
 
   // ==============================================================================
@@ -767,6 +837,7 @@ export function useSimulation() {
     resetSimulation,
     setSystemSpeed,
     handleSpeedUpdate,
+    feedMaterial,
     addLog
   };
 }

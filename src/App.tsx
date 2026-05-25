@@ -18,7 +18,8 @@ function App() {
     pauseSimulation,
     resetSimulation,
     setSystemSpeed,
-    handleSpeedUpdate
+    handleSpeedUpdate,
+    feedMaterial
   } = useSimulation();
 
   return (
@@ -32,6 +33,7 @@ function App() {
         onPause={pauseSimulation}
         onReset={resetSimulation}
         onSpeedChange={setSystemSpeed}
+        onFeedMaterial={feedMaterial}
       />
 
       {/* Main 3-column dashboard grid */}

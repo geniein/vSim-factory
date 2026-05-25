@@ -151,7 +151,7 @@ function connectS7() {
     // DB1.DBW 128 represents Input Register %IW0 (Conveyor Position)
     // DB1.DBW 0 represents Holding Register %MW0 (Completed Cars)
     // DB1.DBW 2 represents Holding Register %MW1 (Conveyor Speed)
-    s7Client.translationCB({
+    const s7Vars = {
       'conveyor_run': 'DB1,X272.0',
       'lift_down': 'DB1,X272.1',
       'clamp_on': 'DB1,X272.2',
@@ -160,7 +160,10 @@ function connectS7() {
       'pos': 'DB1,INT128',
       'completed': 'DB1,INT0',
       'speed': 'DB1,INT2'
-    });
+    };
+
+    s7Client.setTranslationCB((tag) => s7Vars[tag] || tag);
+    s7Client.addItems(Object.keys(s7Vars));
   });
 }
 
@@ -353,17 +356,16 @@ async function runProcessBridge() {
       
       // CNC S7 Holding Register 2 (%MW2 - Chassis Present force) 에 1 기입 (address*2 = 4)
       s7Client.writeItems('DB1,INT4', 1, (err) => {
-        if (!err) cncChassisTriggered = true;
+        if (!err) {
+          // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
+          setTimeout(() => {
+            log('BRIDGE', `Feeder ➔ CNC: 가공 Chassis Present (%MW2=0) 자동 회수`, colors.blue);
+            s7Client.writeItems('DB1,INT4', 0, (err) => {});
+          }, 1000);
+        }
       });
     }
     prevFeederCompleted = curFeederCompleted;
-
-    // CNC가 작동하기 시작해서 위치가 10mm를 넘어가면 트리거 신호를 0으로 회수
-    if (cncChassisTriggered && plcData.cnc.pos > 10) {
-      s7Client.writeItems('DB1,INT4', 0, (err) => {
-        if (!err) cncChassisTriggered = false;
-      });
-    }
   }
 
   // ----------------------------------------------------
@@ -380,19 +382,20 @@ async function runProcessBridge() {
       ]);
       const valBuf = Buffer.from([1, 0]);
       mcSocket.write(Buffer.concat([header, valBuf]));
-      qcChassisTriggered = true;
+      
+      // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
+      setTimeout(() => {
+        if (plcConnections.qc && mcSocket) {
+          log('BRIDGE', `CNC ➔ QC: 비전 Chassis Present (MC D2=0) 자동 회수`, colors.blue);
+          const resetHeader = Buffer.from([
+            0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x02, 0x00, 0x00, 0xA8, 0x01, 0x00
+          ]);
+          const resetValBuf = Buffer.from([0, 0]);
+          mcSocket.write(Buffer.concat([resetHeader, resetValBuf]));
+        }
+      }, 1000);
     }
     prevCncCompleted = curCncCompleted;
-
-    // QC가 감지해서 CNC 위치가 510mm를 넘어가면 트리거를 0으로 자진 회수
-    if (qcChassisTriggered && plcData.cnc.pos > 510) {
-      const header = Buffer.from([
-        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x02, 0x00, 0x00, 0xA8, 0x01, 0x00
-      ]);
-      const valBuf = Buffer.from([0, 0]);
-      mcSocket.write(Buffer.concat([header, valBuf]));
-      qcChassisTriggered = false;
-    }
   }
 
   // ----------------------------------------------------
@@ -413,23 +416,24 @@ async function runProcessBridge() {
         0x02, 0x00, 1, 0
       ]);
       xgtSocket.write(Buffer.concat([header, body]));
-      sorterChassisTriggered = true;
+      
+      // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
+      setTimeout(() => {
+        if (plcConnections.sorter && xgtSocket) {
+          log('BRIDGE', `QC ➔ Sorter: 분류 Chassis Present (XGT %MW2=0) 자동 회수`, colors.blue);
+          const resetHeader = Buffer.from([
+            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, // "LSIS-XGT"
+            0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+          ]);
+          const resetBody = Buffer.from([
+            0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x32, // "%MW2"
+            0x02, 0x00, 0, 0
+          ]);
+          xgtSocket.write(Buffer.concat([resetHeader, resetBody]));
+        }
+      }, 1000);
     }
     prevQcCompleted = curQcCompleted;
-
-    // Sorter가 동작하여 완료가 발생하거나 5초 뒤 강제 회수
-    if (sorterChassisTriggered && plcData.sorter.completed > curQcCompleted) {
-      const header = Buffer.from([
-        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, // "LSIS-XGT"
-        0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
-      ]);
-      const body = Buffer.from([
-        0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x32, // "%MW2"
-        0x02, 0x00, 0, 0
-      ]);
-      xgtSocket.write(Buffer.concat([header, body]));
-      sorterChassisTriggered = false;
-    }
   }
 }
 
@@ -497,6 +501,20 @@ wss.on('connection', (ws) => {
           const intVal = parseInt(value, 10);
           await modbusClient.writeSingleRegister(address, intVal);
           log('MODBUS-WRITE', `Modbus single register ${address} = ${intVal} 작성 성공`, colors.green);
+          
+          // 수동 원자재 투입 (%MW2 = 1)의 경우 1초 후에 자동 0으로 회수하여 펄스 트리거 생성
+          if (address === 2 && intVal === 1) {
+            setTimeout(async () => {
+              try {
+                if (modbusClient && plcConnections.feeder) {
+                  await modbusClient.writeSingleRegister(address, 0);
+                  log('MODBUS-WRITE', `Modbus single register ${address} = 0 수동 투입 신호 자동 회수 완료`, colors.blue);
+                }
+              } catch (err) {
+                log('MODBUS-WRITE', `Modbus single register ${address} = 0 자동 회수 실패: ${err.message}`, colors.red);
+              }
+            }, 1000);
+          }
         }
         
         // 2. Write to CNC (S7) Holding Register (DB1)
