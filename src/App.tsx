@@ -25,7 +25,8 @@ function App() {
     setSystemSpeed,
     handleSpeedUpdate,
     feedMaterial,
-    stopAllPlcs
+    stopAllPlcs,
+    startAllPlcs
   } = useSimulation();
 
   return (
@@ -45,6 +46,9 @@ function App() {
         onDynamicStageCountChange={setDynamicStageCount}
         onApplyDynamicStageCount={applyDynamicStageCount}
         onStopPlcs={stopAllPlcs}
+        onStartPlcs={startAllPlcs}
+        plcConnections={stats.plcConnections || { feeder: false, cnc: false, qc: false, sorter: false }}
+        dynamicPlcsData={dynamicPlcsData}
       />
 
       {/* Main 3-column dashboard grid */}

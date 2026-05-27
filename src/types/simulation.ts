@@ -64,6 +64,10 @@ export interface PlcData {
   feeder: {
     conveyor_run: boolean;
     error: boolean;
+    pos?: number;
+    speed?: number;
+    completed?: number;
+    serial?: string;
   };
   cnc: {
     conveyor_run: boolean;
@@ -74,6 +78,7 @@ export interface PlcData {
     pos: number;
     completed: number;
     error: boolean;
+    serial?: string;
   };
   qc: {
     conveyor_run: boolean;
@@ -81,11 +86,16 @@ export interface PlcData {
     rotate_right: boolean;
     completed: number;
     error: boolean;
+    pos?: number;
+    speed?: number;
+    serial?: string;
   };
   sorter: {
     conveyor_run: boolean;
     completed: number;
     speed: number;
     error: boolean;
+    pos?: number;
+    serial?: string;
   };
 }

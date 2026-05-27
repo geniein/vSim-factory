@@ -189,13 +189,14 @@ start_plcs() {
         # Embedded web server port도 충돌나지 않게 8080 + offset 형태로 전달
         WEB_PORT=$((8080 + OFFSET))
         
-        nohup ./vPlc -p "$PROTOCOL" -o "$OFFSET" -w "$WEB_PORT" assembly > "$LOG_DIR/plc${i}_dynamic_${PROTOCOL}.log" 2>&1 < /dev/null &
+        nohup ./build/vPlc -p "$PROTOCOL" -o "$OFFSET" -w "$WEB_PORT" --headless ./build/libassembly_logic.so > "$LOG_DIR/plc${i}_dynamic_${PROTOCOL}.log" 2>&1 < /dev/null &
         PLC_PID=$!
         
         cd "$FACTORY_DIR" || exit 1
         
         # PIDs 및 프로토콜 정보 저장
         echo "$i:$PROTOCOL:$PORT:$PLC_PID" >> "$PID_FILE"
+        sleep 0.25
     done
     
     echo "--------------------------------------------------------"

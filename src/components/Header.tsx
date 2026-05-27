@@ -16,6 +16,9 @@ interface HeaderProps {
   onDynamicStageCountChange: (count: number) => void;
   onApplyDynamicStageCount: () => void;
   onStopPlcs: () => void;
+  onStartPlcs: () => void;
+  plcConnections: { feeder: boolean; cnc: boolean; qc: boolean; sorter: boolean };
+  dynamicPlcsData: any[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,7 +34,10 @@ export const Header: React.FC<HeaderProps> = ({
   dynamicStageCount,
   onDynamicStageCountChange,
   onApplyDynamicStageCount,
-  onStopPlcs
+  onStopPlcs,
+  onStartPlcs,
+  plcConnections,
+  dynamicPlcsData
 }) => {
   // Format uptime into mm:ss
   const formatUptime = (seconds: number) => {
@@ -41,6 +47,10 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const speedOptions = [0.5, 1.0, 2.0, 4.0];
+
+  const isPlcRuntimeActive = settings.plcMode === 'runtime'
+    ? (plcConnections.feeder || plcConnections.cnc || plcConnections.qc || plcConnections.sorter)
+    : (dynamicPlcsData && dynamicPlcsData.some((p: any) => p.online));
 
   return (
     <header className="glass-panel header-bar">
@@ -161,19 +171,17 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           ) : (
             <>
-              {settings.plcMode !== 'dynamic' && (
-                <button
-                  className="control-btn"
-                  onClick={onFeedMaterial}
-                  style={{
-                    borderColor: 'var(--color-cyber-purple)',
-                    background: 'rgba(168, 85, 247, 0.1)',
-                    boxShadow: '0 0 10px rgba(168, 85, 247, 0.15)'
-                  }}
-                >
-                  <Package size={16} style={{ color: 'var(--color-cyber-purple)' }} /> 원자재 투입
-                </button>
-              )}
+              <button
+                className="control-btn"
+                onClick={onFeedMaterial}
+                style={{
+                  borderColor: 'var(--color-cyber-purple)',
+                  background: 'rgba(168, 85, 247, 0.1)',
+                  boxShadow: '0 0 10px rgba(168, 85, 247, 0.15)'
+                }}
+              >
+                <Package size={16} style={{ color: 'var(--color-cyber-purple)' }} /> 원자재 투입
+              </button>
               <button className="control-btn" onClick={onPause} style={{ borderColor: 'var(--color-warning-amber)' }}>
                 <Pause size={16} style={{ color: 'var(--color-warning-amber)' }} /> 일시정지
               </button>
@@ -185,20 +193,37 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {settings.plcMode !== 'emulated' && (
-            <button
-              className="control-btn"
-              onClick={onStopPlcs}
-              style={{
-                borderColor: '#ef4444',
-                background: 'rgba(239, 68, 68, 0.12)',
-                color: '#fca5a5',
-                boxShadow: '0 0 10px rgba(239, 68, 68, 0.25)',
-                fontWeight: 600
-              }}
-              title="C++ vPLC 프로세스 강제 종료 및 소멸 (./vplc-dynamic-run.sh stop)"
-            >
-              <Power size={16} style={{ color: '#ef4444' }} /> PLC OFF
-            </button>
+            isPlcRuntimeActive ? (
+              <button
+                className="control-btn"
+                onClick={onStopPlcs}
+                style={{
+                  borderColor: '#ef4444',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  color: '#fca5a5',
+                  boxShadow: '0 0 12px rgba(239, 68, 68, 0.4)',
+                  fontWeight: 600
+                }}
+                title="C++ vPLC 프로세스 일괄 안전 정지 및 소멸 지시"
+              >
+                <Power size={16} style={{ color: '#ef4444' }} /> vPLC OFF (정지)
+              </button>
+            ) : (
+              <button
+                className="control-btn pulse-indicator"
+                onClick={onStartPlcs}
+                style={{
+                  borderColor: 'var(--color-active-green)',
+                  background: 'rgba(16, 185, 129, 0.12)',
+                  color: 'var(--color-active-green)',
+                  boxShadow: '0 0 12px rgba(16, 185, 129, 0.4)',
+                  fontWeight: 600
+                }}
+                title="C++ 백그라운드 vPLC 프로세스 일괄 기동"
+              >
+                <Power size={16} style={{ color: 'var(--color-active-green)' }} /> 🔌 vPLC ON (기동)
+              </button>
+            )
           )}
         </div>
       </div>

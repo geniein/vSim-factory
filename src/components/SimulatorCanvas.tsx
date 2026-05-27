@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Activity, Package, Trash2, Cpu } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Activity, Package, Trash2, Cpu, Power } from 'lucide-react';
 import type { Item, Machine, SimulationSettings, PlcData } from '../types/simulation';
 import { PATH_COORDINATES } from '../hooks/useSimulation';
 
@@ -27,7 +27,101 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
   const m1 = useMemo(() => machines.find((m) => m.id === 'm1'), [machines]);
   const m2 = useMemo(() => machines.find((m) => m.id === 'm2'), [machines]);
 
+  const [selectedPlc, setSelectedPlc] = useState<any | null>(null);
+
   const isDynamicMode = settings.plcMode === 'dynamic';
+
+  const getAutomotiveRole = (idx: number) => {
+    const roles = [
+      {
+        name: '원자재 보관 창고 (Raw Chassis Warehouse)',
+        desc: '다양한 차대번호 \'AAA 123123\' 규칙의 신규 차량 차체 원자재가 보관되고 있으며, 조립 라인 요청에 의해 신규 투입을 지연 대기하는 창고입니다.'
+      },
+      {
+        name: '의장 배선 & 하네스 결합 (Cockpit Wiring)',
+        desc: 'ECU 배선 하네스, 계기판 대시보드 및 복잡한 전장 멀티플렉스 와이어 케이블을 차실 내부에 정밀 배치 및 고정 조립합니다.'
+      },
+      {
+        name: '파워트레인 드레싱 & 인스톨 (Powertrain Marriage)',
+        desc: '차체 섀시 하부로부터 메인 구동 엔진(또는 고전압 모터) 및 기어 트랜스미션을 체결 토크 기준에 의거하여 결합합니다.'
+      },
+      {
+        name: '고전압 배터리 마운팅 (HV Battery Decking)',
+        desc: '친환경 차량을 위한 대용량 리튬이온 고전압 배터리 팩을 로봇 리프트로 인양하여 차량 하부에 완벽 차폐 및 정밀 체결합니다.'
+      },
+      {
+        name: '전후방 윈드실드 도포 및 합체 (Glass Sealing & Mount)',
+        desc: '로봇 압출 헤드로 글래스 접착 실런트를 균일 분사하여 앞/뒤 프론트 글래스를 진공 패드로 흡착, 기밀 조립합니다.'
+      },
+      {
+        name: '시트 및 시각 인테리어 실장 (Cabin Seat Install)',
+        desc: '운전석 및 전후석 좌석 시트, 천장 헤드라이닝과 가죽 필러 트림 내장재를 기계식 서보 암으로 투입하여 완전 밀착 조립합니다.'
+      },
+      {
+        name: '조향 컬럼 및 서스펜션 안착 (Steering & Suspension)',
+        desc: '서스펜션 댐퍼 서브 프레임, 드라이브 샤프트 및 정밀 스티어링 기어 컬럼 랙을 연결 정렬 및 토크 결속합니다.'
+      },
+      {
+        name: '제동 브레이크 및 디스크 조립 (Brake & Caliper Fitting)',
+        desc: 'ABS 액추에이터 튜브 라인 결합, 제동용 브레이크 디스크 로터와 캘리퍼 브래킷을 자동 볼트 조임기로 체결합니다.'
+      },
+      {
+        name: '휠 타이어 자동 조립 (Wheel & Tire Decking)',
+        desc: '알로이 휠 및 타이어를 축 방향으로 동시 공급하여 전용 너트 러너 머신으로 5축 동시 정밀 결속합니다.'
+      },
+      {
+        name: '액체 고압 진공 주입 (Fluids & Coolant Vacuum)',
+        desc: '브레이크 오일, 냉각수, 에어컨 냉매 및 파워 스티어링 액을 고압 진공 배관을 통해 누설 없이 주입 제어합니다.'
+      },
+      {
+        name: '외장 범퍼 및 보닛 마운팅 (Bumper & Hood Dressing)',
+        desc: '프론트/리어 에어로다이내믹 범퍼 패널과 엔진룸 후드 보닛, 라이트 아웃사이더 쉘을 대칭 정렬로 조립 마감합니다.'
+      },
+      {
+        name: 'ADAS 비전 정밀 정렬 (ADAS Camera Calibration)',
+        desc: '스마트 자율주행(ADAS)용 전후방 카메라, 레이더 센서 및 초음파 감지기를 캘리브레이션 표적을 사용해 보정 튜닝합니다.'
+      },
+      {
+        name: 'ECU 무선 펌웨어 플래싱 (ECU Firmware Flashing)',
+        desc: '차량 통합 게이트웨이 컴퓨터 및 바디 제어 모듈에 이더넷 연동으로 최종 인증 펌웨어 및 주행 소프트웨어를 주입합니다.'
+      },
+      {
+        name: '휠 얼라인먼트 보정 (Wheel Alignment Test)',
+        desc: '4륜의 토인(Toe-in), 캠버(Camber), 캐스터 정밀 각도를 3D 레이저 센서 측정값에 기초하여 최종 체결 보정합니다.'
+      },
+      {
+        name: '차량 등화 및 전기 성능 시험 (Electrical Function Test)',
+        desc: '상/하향등, 지시등, 하이브리드 고전압 구동 회로 및 인포테인먼트 계통의 전압 전류 파형 정상 유무를 테스트합니다.'
+      },
+      {
+        name: '고압 수밀 차폐 방수 시험 (Water Leak & Shower Test)',
+        desc: '특수 챔버 내부에서 사방 50bar 이상의 고압 분무 샤워를 3분간 가해 도어 고무 스트립 및 씰 유격에 의한 누수 유무를 센싱합니다.'
+      },
+      {
+        name: '하부 비전 조립 정밀 감사 (Underbody Vision Audit)',
+        desc: '피트 하단에 설치된 다채널 초고해상도 비전 센서를 통해 하부 볼트 누락, 오일 미세 누유 및 배관 배치 불량을 AI 판별합니다.'
+      },
+      {
+        name: '샤시 다이나모 동력 성능 시험 (Chassis Dynamo Test)',
+        desc: '롤러 다이나모미터 위에서 가속 및 감속 부하 운전을 통해 엔진/모터 동력 전달 효율 및 소음 진동(NVH)을 측정합니다.'
+      },
+      {
+        name: '최종 비전 AI 도장 도막 검사 (Paint Visual Audit)',
+        desc: '다관절 로봇에 부착된 레이저 스캐닝 센서와 AI 비전 판독으로 미세 흠집(Scratch), 티끌(Dust), 색차 불량을 자동 판정합니다.'
+      },
+      {
+        name: '최종 양품 출하 검인 및 적재 (Final Audit & Delivery)',
+        desc: '전체 공정 패스 차량에 바코드를 발부하고 물류 크레인에 적송 명령을 내려 완성 차량을 적재 출하합니다.'
+      }
+    ];
+    if (idx >= 0 && idx < roles.length) {
+      return roles[idx];
+    }
+    return {
+      name: `의장 공정 스테이지 #${idx + 1} (Assembly Stage)`,
+      desc: `차량 조립라인의 의장 생산을 대행하는 ${idx + 1}번째 이기종 가상 제어 스테이지입니다.`
+    };
+  };
 
   // Protocol mapper helper
   const getProtocolInfo = (idx: number) => {
@@ -301,41 +395,131 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
                 if (hasError) filterId = 'url(#glow-crimson-filter)';
 
                 return (
-                  <g key={`station-${idx}`} transform={`translate(${pt.x}, ${pt.y})`}>
-                    <circle
-                      cx="0"
-                      cy="0"
-                      r="20"
-                      fill="rgba(15, 23, 42, 0.95)"
-                      stroke={hasError ? 'var(--color-error-crimson)' : isOnline ? plc.color : 'var(--text-muted)'}
-                      strokeWidth="2"
-                      filter={filterId}
-                      style={{ transition: 'all 0.3s' }}
-                    />
+                  <g
+                    key={`station-${idx}`}
+                    transform={`translate(${pt.x}, ${pt.y})`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => setSelectedPlc({ ...plc, role: getAutomotiveRole(idx) })}
+                  >
+                    {idx === 0 && (
+                      <text x="0" y="-29" fill="var(--color-cyber-blue)" fontSize="7.5" fontWeight="bold" textAnchor="middle" filter="url(#glow-blue-filter)" letterSpacing="0.5px">
+                        RAW CHASSIS WAREHOUSE
+                      </text>
+                    )}
+                    {idx === 0 ? (
+                      <g>
+                        {/* Premium Glowing Warehouse rect */}
+                        <rect
+                          x="-22"
+                          y="-22"
+                          width="44"
+                          height="44"
+                          rx="8"
+                          fill="rgba(15, 23, 42, 0.95)"
+                          stroke={hasError ? 'var(--color-error-crimson)' : isOnline ? 'var(--color-cyber-blue)' : 'var(--text-muted)'}
+                          strokeWidth="2.5"
+                          filter={hasError ? 'url(#glow-crimson-filter)' : isOnline ? 'url(#glow-blue-filter)' : 'none'}
+                          style={{ transition: 'all 0.3s' }}
+                        />
+                        {/* Warehouse Icon Path */}
+                        <path
+                          d="M -12 8 L -12 -3 L 0 -11 L 12 -3 L 12 8 Z"
+                          fill="rgba(56, 189, 248, 0.05)"
+                          stroke={isOnline ? 'var(--color-cyber-blue)' : 'var(--text-muted)'}
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="M -5 8 L -5 3 L 5 3 L 5 8"
+                          fill="none"
+                          stroke={isOnline ? 'var(--color-cyber-blue)' : 'var(--text-muted)'}
+                          strokeWidth="1.5"
+                        />
+                        {/* Small glowing core at the center of the warehouse */}
+                        <circle
+                          cx="0"
+                          cy="0"
+                          r="3"
+                          fill={isOnline ? 'var(--color-cyber-blue)' : 'var(--text-muted)'}
+                          className={isRunningPlc && isOnline ? "pulse-indicator" : ""}
+                        />
+                      </g>
+                    ) : (
+                      <g>
+                        <circle
+                          cx="0"
+                          cy="0"
+                          r="20"
+                          fill="rgba(15, 23, 42, 0.95)"
+                          stroke={hasError ? 'var(--color-error-crimson)' : isOnline ? plc.color : 'var(--text-muted)'}
+                          strokeWidth="2"
+                          filter={filterId}
+                          style={{ transition: 'all 0.3s' }}
+                        />
 
-                    {isRunningPlc && isOnline && (
-                      <g className="rotate-anim-fast">
-                        <circle cx="0" cy="0" r="14" fill="none" stroke={plc.color} strokeWidth="1.5" strokeDasharray="5,3" opacity="0.6" />
+                        {isRunningPlc && isOnline && (
+                          <g className="rotate-anim-fast">
+                            <circle cx="0" cy="0" r="14" fill="none" stroke={plc.color} strokeWidth="1.5" strokeDasharray="5,3" opacity="0.6" />
+                          </g>
+                        )}
+
+                        {/* ENGAGED Premium Neon Pulse & Scanning Laser Effect */}
+                        {isOnline && !isRunningPlc && plc.data.serial && plc.data.serial.trim() !== "" && (
+                          <g>
+                            <circle
+                              cx="0"
+                              cy="0"
+                              r="23"
+                              fill="none"
+                              stroke={plc.color}
+                              strokeWidth="1.5"
+                              opacity="0.8"
+                              className="pulse-indicator"
+                              filter="url(#laser-filter)"
+                            />
+                            <line
+                              x1="-14"
+                              y1="0"
+                              x2="14"
+                              y2="0"
+                              stroke={plc.color}
+                              strokeWidth="1.5"
+                              className="laser-scanner"
+                              filter="url(#laser-filter)"
+                            />
+                            <text
+                              x="0"
+                              y="-25"
+                              fill={plc.color}
+                              fontSize="5.5"
+                              fontWeight="bold"
+                              textAnchor="middle"
+                              className="pulse-indicator"
+                              letterSpacing="0.2px"
+                            >
+                              ENGAGED
+                            </text>
+                          </g>
+                        )}
+
+                        <circle
+                          cx="0"
+                          cy="0"
+                          r="4"
+                          fill={hasError ? 'var(--color-error-crimson)' : isOnline ? plc.color : 'var(--text-muted)'}
+                        />
+
+                        <text
+                          x="0"
+                          y="-7"
+                          fill="var(--text-primary)"
+                          fontSize="6.5"
+                          fontWeight="bold"
+                          textAnchor="middle"
+                        >
+                          {plc.protocol === 'modbus' ? 'MB' : plc.protocol === 's7' ? 'S7' : plc.protocol === 'mc' ? 'MC' : 'XG'}
+                        </text>
                       </g>
                     )}
-
-                    <circle
-                      cx="0"
-                      cy="0"
-                      r="4"
-                      fill={hasError ? 'var(--color-error-crimson)' : isOnline ? plc.color : 'var(--text-muted)'}
-                    />
-
-                    <text
-                      x="0"
-                      y="-7"
-                      fill="var(--text-primary)"
-                      fontSize="6.5"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                    >
-                      {plc.protocol === 'modbus' ? 'MB' : plc.protocol === 's7' ? 'S7' : plc.protocol === 'mc' ? 'MC' : 'XG'}
-                    </text>
 
                     <text
                       x="0"
@@ -369,7 +553,7 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
                         textAnchor="middle"
                         className="font-mono-tech"
                       >
-                        {isOnline ? `${plc.data.completed} EA` : 'OFFLINE'}
+                        {idx === 0 ? 'RAW WH' : isOnline ? `${plc.data.completed} EA` : 'OFFLINE'}
                       </text>
                     </g>
                   </g>
@@ -377,13 +561,14 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
               })}
 
               {/* Glowing Cargo boxes gliding along conveyor segments */}
-              {plcsToDraw.map((plc, idx) => {
+              {isRunning && plcsToDraw.map((plc, idx) => {
                 if (!plc.online) return null;
                 
-                const isRunningPlc = plc.data.conveyor_run;
-                const pos = plc.data.pos || 0;
+                // Enforce Chassis Serial Guard: ignore ghost/empty-serial cargos!
+                const serial = plc.data.serial ? plc.data.serial.trim() : "";
+                if (serial === "") return null;
                 
-                if (!isRunningPlc && pos === 0) return null;
+                const pos = plc.data.pos || 0;
                 
                 const p = pos / 1000;
                 const pt1 = getStageCoords(idx);
@@ -550,7 +735,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
               </g>
 
               {/* STATION 1: SPAWNER / ITEM INPUT */}
-              <g transform={`translate(${PATH_COORDINATES.spawn.x - 25}, ${PATH_COORDINATES.spawn.y - 25})`}>
+              <g
+                transform={`translate(${PATH_COORDINATES.spawn.x - 25}, ${PATH_COORDINATES.spawn.y - 25})`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => setSelectedPlc({
+                  idx: 1,
+                  protocol: 'modbus',
+                  port: 5030,
+                  online: plcConnections.feeder,
+                  data: {
+                    conveyor_run: plcData.feeder.conveyor_run,
+                    pos: plcData.feeder.pos,
+                    speed: plcData.feeder.speed,
+                    completed: plcData.feeder.completed,
+                    serial: plcData.feeder.serial,
+                    error: plcData.feeder.error
+                  },
+                  color: 'var(--color-active-green)',
+                  role: getAutomotiveRole(0)
+                })}
+              >
                 <rect
                   width="50"
                   height="50"
@@ -567,13 +771,32 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
                   fill="var(--color-cyber-blue)"
                   className="pulse-indicator"
                 />
-                <text x="25" y="44" fill="var(--text-secondary)" fontSize="7" textAnchor="middle" fontWeight="bold">INPUT</text>
+                <text x="25" y="44" fill="var(--text-secondary)" fontSize="7" textAnchor="middle" fontWeight="bold">WAREHOUSE</text>
                 <rect x="18" y="10" width="14" height="14" rx="2" fill="none" stroke="var(--text-secondary)" strokeWidth="1.5" />
               </g>
 
               {/* STATION 2: CNC PRECISION MACHINE (M1) */}
               {m1 && (
-                <g transform="translate(230, 140)">
+                <g
+                  transform="translate(230, 140)"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelectedPlc({
+                    idx: 2,
+                    protocol: 's7',
+                    port: 1040,
+                    online: plcConnections.cnc,
+                    data: {
+                      conveyor_run: plcData.cnc.conveyor_run,
+                      pos: plcData.cnc.pos,
+                      speed: plcData.cnc.speed,
+                      completed: plcData.cnc.completed,
+                      serial: plcData.cnc.serial,
+                      error: plcData.cnc.error
+                    },
+                    color: 'var(--color-cyber-blue)',
+                    role: getAutomotiveRole(2)
+                  })}
+                >
                   <rect
                     width="100"
                     height="120"
@@ -628,7 +851,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
 
               {/* STATION 3: QC VISION INSPECTION STATION (M2) */}
               {m2 && (
-                <g transform="translate(470, 140)">
+                <g
+                  transform="translate(470, 140)"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelectedPlc({
+                    idx: 3,
+                    protocol: 'mc',
+                    port: 5041,
+                    online: plcConnections.qc,
+                    data: {
+                      conveyor_run: plcData.qc.conveyor_run,
+                      pos: plcData.qc.pos,
+                      speed: plcData.qc.speed,
+                      completed: plcData.qc.completed,
+                      serial: plcData.qc.serial,
+                      error: plcData.qc.error
+                    },
+                    color: 'var(--color-cyber-purple)',
+                    role: getAutomotiveRole(16)
+                  })}
+                >
                   <rect
                     width="100"
                     height="120"
@@ -672,7 +914,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
               )}
 
               {/* STATION 4: WAREHOUSE / COMPLETED CARGO STORAGE */}
-              <g transform={`translate(${PATH_COORDINATES.warehouse.x - 30}, ${PATH_COORDINATES.warehouse.y - 35})`}>
+              <g
+                transform={`translate(${PATH_COORDINATES.warehouse.x - 30}, ${PATH_COORDINATES.warehouse.y - 35})`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => setSelectedPlc({
+                  idx: 4,
+                  protocol: 'xgt',
+                  port: 2044,
+                  online: plcConnections.sorter,
+                  data: {
+                    conveyor_run: plcData.sorter.conveyor_run,
+                    pos: plcData.sorter.pos,
+                    speed: plcData.sorter.speed,
+                    completed: plcData.sorter.completed,
+                    serial: plcData.sorter.serial,
+                    error: plcData.sorter.error
+                  },
+                  color: '#22d3ee',
+                  role: getAutomotiveRole(19)
+                })}
+              >
                 <rect
                   width="70"
                   height="70"
@@ -704,7 +965,7 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
               </g>
 
               {/* FLOATING ACTIVE CARGO ITEMS */}
-              {items.map((item) => {
+              {isRunning && items.map((item) => {
                 let filterId = 'url(#glow-blue-filter)';
                 let borderColor = 'var(--color-cyber-blue)';
                 
@@ -778,7 +1039,8 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
             <div
               key={`hud-${plc.idx}`}
               className={`plc-hud-card ${plc.online ? 'online' : 'offline'}`}
-              style={{ '--glow-color': plc.color } as React.CSSProperties}
+              style={{ '--glow-color': plc.color, cursor: 'pointer' } as React.CSSProperties}
+              onClick={() => setSelectedPlc({ ...plc, role: getAutomotiveRole(plc.idx - 1) })}
             >
               <div className="plc-hud-header">
                 <span className="plc-hud-title font-mono-tech" style={{ fontSize: '0.72rem' }}>
@@ -818,7 +1080,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
       ) : (
         <div className="plc-hud-grid">
           {/* PLC #1 Spawner/Feeder HUD */}
-          <div className={`plc-hud-card ${displayPlc.feeder.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-cyber-blue)' } as React.CSSProperties}>
+          <div
+            className={`plc-hud-card ${displayPlc.feeder.online ? 'online' : 'offline'}`}
+            style={{ '--glow-color': 'var(--color-active-green)', cursor: 'pointer' } as React.CSSProperties}
+            onClick={() => setSelectedPlc({
+              idx: 1,
+              protocol: 'modbus',
+              port: 5030,
+              online: plcConnections.feeder,
+              data: {
+                conveyor_run: plcData.feeder.conveyor_run,
+                pos: plcData.feeder.pos,
+                speed: plcData.feeder.speed,
+                completed: plcData.feeder.completed,
+                serial: plcData.feeder.serial,
+                error: plcData.feeder.error
+              },
+              color: 'var(--color-active-green)',
+              role: getAutomotiveRole(0)
+            })}
+          >
             <div className="plc-hud-header">
               <span className="plc-hud-title font-mono-tech">PLC_01 [Modbus TCP]</span>
               <span className={`plc-hud-status-dot ${displayPlc.feeder.online ? 'active' : 'inactive'}`} />
@@ -856,7 +1137,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
           </div>
 
           {/* PLC #2 CNC HUD */}
-          <div className={`plc-hud-card ${displayPlc.cnc.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-cyber-blue)' } as React.CSSProperties}>
+          <div
+            className={`plc-hud-card ${displayPlc.cnc.online ? 'online' : 'offline'}`}
+            style={{ '--glow-color': 'var(--color-cyber-blue)', cursor: 'pointer' } as React.CSSProperties}
+            onClick={() => setSelectedPlc({
+              idx: 2,
+              protocol: 's7',
+              port: 1040,
+              online: plcConnections.cnc,
+              data: {
+                conveyor_run: plcData.cnc.conveyor_run,
+                pos: plcData.cnc.pos,
+                speed: plcData.cnc.speed,
+                completed: plcData.cnc.completed,
+                serial: plcData.cnc.serial,
+                error: plcData.cnc.error
+              },
+              color: 'var(--color-cyber-blue)',
+              role: getAutomotiveRole(2)
+            })}
+          >
             <div className="plc-hud-header">
               <span className="plc-hud-title font-mono-tech">PLC_02 [Siemens S7]</span>
               <span className={`plc-hud-status-dot ${displayPlc.cnc.online ? 'active' : 'inactive'}`} />
@@ -890,7 +1190,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
           </div>
 
           {/* PLC #3 QC HUD */}
-          <div className={`plc-hud-card ${displayPlc.qc.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-cyber-purple)' } as React.CSSProperties}>
+          <div
+            className={`plc-hud-card ${displayPlc.qc.online ? 'online' : 'offline'}`}
+            style={{ '--glow-color': 'var(--color-cyber-purple)', cursor: 'pointer' } as React.CSSProperties}
+            onClick={() => setSelectedPlc({
+              idx: 3,
+              protocol: 'mc',
+              port: 5041,
+              online: plcConnections.qc,
+              data: {
+                conveyor_run: plcData.qc.conveyor_run,
+                pos: plcData.qc.pos,
+                speed: plcData.qc.speed,
+                completed: plcData.qc.completed,
+                serial: plcData.qc.serial,
+                error: plcData.qc.error
+              },
+              color: 'var(--color-cyber-purple)',
+              role: getAutomotiveRole(16)
+            })}
+          >
             <div className="plc-hud-header">
               <span className="plc-hud-title font-mono-tech">PLC_03 [MELSEC MC]</span>
               <span className={`plc-hud-status-dot ${displayPlc.qc.online ? 'active' : 'inactive'}`} />
@@ -926,7 +1245,26 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
           </div>
 
           {/* PLC #4 Sorter HUD */}
-          <div className={`plc-hud-card ${displayPlc.sorter.online ? 'online' : 'offline'}`} style={{ '--glow-color': 'var(--color-active-green)' } as React.CSSProperties}>
+          <div
+            className={`plc-hud-card ${displayPlc.sorter.online ? 'online' : 'offline'}`}
+            style={{ '--glow-color': '#22d3ee', cursor: 'pointer' } as React.CSSProperties}
+            onClick={() => setSelectedPlc({
+              idx: 4,
+              protocol: 'xgt',
+              port: 2044,
+              online: plcConnections.sorter,
+              data: {
+                conveyor_run: plcData.sorter.conveyor_run,
+                pos: plcData.sorter.pos,
+                speed: plcData.sorter.speed,
+                completed: plcData.sorter.completed,
+                serial: plcData.sorter.serial,
+                error: plcData.sorter.error
+              },
+              color: '#22d3ee',
+              role: getAutomotiveRole(19)
+            })}
+          >
             <div className="plc-hud-header">
               <span className="plc-hud-title font-mono-tech">PLC_04 [LS-XGT FEnet]</span>
               <span className={`plc-hud-status-dot ${displayPlc.sorter.online ? 'active' : 'inactive'}`} />
@@ -997,6 +1335,217 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
           </>
         )}
       </div>
-    </div>
+
+      <style>{`
+        .terminal-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(4, 6, 12, 0.75);
+          backdrop-filter: blur(8px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+          animation: fadeIn 0.2s ease-out;
+        }
+        .terminal-modal-card {
+          width: 520px;
+          max-width: 90vw;
+          background: rgba(10, 15, 30, 0.96);
+          border: 1px solid rgba(56, 189, 248, 0.25);
+          border-radius: 12px;
+          box-shadow: 0 20px 45px rgba(0,0,0,0.8), 0 0 25px rgba(56, 189, 248, 0.15);
+          overflow: hidden;
+          animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .terminal-modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 1rem 1.25rem;
+          border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .terminal-modal-close {
+          background: none;
+          border: none;
+          color: var(--text-secondary);
+          font-size: 1.6rem;
+          cursor: pointer;
+          line-height: 1;
+          transition: color 0.2s;
+        }
+        .terminal-modal-close:hover {
+          color: var(--text-primary);
+        }
+        .terminal-modal-body {
+          padding: 1.25rem;
+        }
+        .terminal-info-section h4 {
+          margin: 0 0 0.5rem 0;
+          font-size: 0.82rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+        }
+        .terminal-data-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 0.3rem 0;
+          border-bottom: 1px solid rgba(255,255,255,0.02);
+        }
+        .terminal-data-row .label {
+          color: var(--text-secondary);
+        }
+        .terminal-data-row .value {
+          color: var(--text-primary);
+        }
+        .terminal-modal-footer {
+          padding: 0.75rem 1.25rem;
+          border-top: 1px solid rgba(255,255,255,0.05);
+          display: flex;
+          justify-content: flex-end;
+          background: rgba(255,255,255,0.01);
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideUp {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+      `}</style>
+
+      {selectedPlc && (
+        <div className="terminal-modal-overlay" onClick={() => setSelectedPlc(null)}>
+          <div className="terminal-modal-card glass-panel" onClick={(e) => e.stopPropagation()} style={{ borderColor: selectedPlc.online ? selectedPlc.color : 'var(--color-error-crimson)' }}>
+            <div className="terminal-modal-header" style={{ borderBottomColor: 'rgba(255,255,255,0.08)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Cpu size={20} style={{ color: selectedPlc.online ? selectedPlc.color : 'var(--color-error-crimson)' }} />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {selectedPlc.role.name}
+                  </h3>
+                  <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }} className="font-mono-tech">
+                    STAGE #{String(selectedPlc.idx).padStart(2, '0')} | vPLC CONTROLLER
+                  </span>
+                </div>
+              </div>
+              <button className="terminal-modal-close" onClick={() => setSelectedPlc(null)}>&times;</button>
+            </div>
+            
+            <div className="terminal-modal-body">
+              <div className="terminal-info-section">
+                <h4 style={{ color: selectedPlc.color || 'var(--text-primary)', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>공정 설명</h4>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0.25rem 0 0 0' }}>
+                  {selectedPlc.role.desc}
+                </p>
+              </div>
+
+              <div className="terminal-info-section" style={{ marginTop: '1.25rem' }}>
+                <h4 style={{ color: selectedPlc.color || 'var(--text-primary)', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>vPLC 통신 정보</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem 1rem', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                  <div className="terminal-data-row">
+                    <span className="label">프로토콜:</span>
+                    <span className="value" style={{ color: selectedPlc.color, fontWeight: 'bold' }}>{selectedPlc.protocol.toUpperCase()}</span>
+                  </div>
+                  <div className="terminal-data-row">
+                    <span className="label">연결 IP:</span>
+                    <span className="value">127.0.0.1</span>
+                  </div>
+                  <div className="terminal-data-row">
+                    <span className="label">대상 포트:</span>
+                    <span className="value text-amber" style={{ fontWeight: 'bold' }}>{selectedPlc.port}</span>
+                  </div>
+                  <div className="terminal-data-row">
+                    <span className="label">통신 상태:</span>
+                    <span className="value" style={{ color: selectedPlc.online ? 'var(--color-active-green)' : 'var(--color-error-crimson)', fontWeight: 'bold' }}>
+                      {selectedPlc.online ? '🟢 ONLINE' : '🔴 OFFLINE'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="terminal-info-section" style={{ marginTop: '1.25rem' }}>
+                <h4 style={{ color: selectedPlc.color || 'var(--text-primary)', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>실시간 입출력 메모리 레지스터 맵</h4>
+                {selectedPlc.online ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                    
+                    {/* conveyor_run coil */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>%QX0.0 (컨베이어 구동 코일)</span>
+                      <span className="font-mono-tech" style={{ color: selectedPlc.data.conveyor_run ? 'var(--color-active-green)' : 'var(--text-muted)', fontWeight: 'bold' }}>
+                        {selectedPlc.data.conveyor_run ? 'ON (1)' : 'OFF (0)'}
+                      </span>
+                    </div>
+
+                    {/* pos register */}
+                    <div style={{ display: 'flex', flexDirection: 'column', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.5rem', borderRadius: '4px', gap: '0.25rem', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>%IW0 (컨베이어 이송 위치)</span>
+                        <span className="text-blue" style={{ fontWeight: 'bold' }}>
+                          {selectedPlc.data.pos || 0} mm / 1000 mm
+                        </span>
+                      </div>
+                      <div style={{ width: '100%', height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                        <div style={{ width: `${(selectedPlc.data.pos || 0) / 10}%`, height: '100%', background: selectedPlc.color, transition: 'width 0.05s linear' }} />
+                      </div>
+                    </div>
+
+                    {/* speed register */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>%MW1 (설정 컨베이어 속도)</span>
+                      <span className="text-amber" style={{ fontWeight: 'bold' }}>
+                        {selectedPlc.data.speed || 200} mm/s
+                      </span>
+                    </div>
+
+                    {/* completed count register */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>%MW0 (누적 가공 조립 수량)</span>
+                      <span className="text-green" style={{ color: 'var(--color-active-green)', fontWeight: 'bold' }}>
+                        {selectedPlc.data.completed || 0} EA
+                      </span>
+                    </div>
+
+                    {/* serial register */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>%MW10..14 (차대 시리얼 바코드)</span>
+                      <span className="text-blue" style={{ fontWeight: 'bold', letterSpacing: '0.5px' }}>
+                        {selectedPlc.data.serial && selectedPlc.data.serial.trim() ? selectedPlc.data.serial : '대기 중...'}
+                      </span>
+                    </div>
+
+                    {/* error coil */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'rgba(255,255,255,0.02)', padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.02)' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>%QX0.6 (공정 에러 경보)</span>
+                      <span style={{ color: selectedPlc.data.error ? 'var(--color-error-crimson)' : 'var(--color-active-green)', fontWeight: 'bold' }}>
+                        {selectedPlc.data.error ? '⚠️ ALARM' : '🟩 SAFE'}
+                      </span>
+                    </div>
+
+                  </div>
+                ) : (
+                  <div style={{ padding: '1.5rem 0', textAlign: 'center', color: 'var(--color-error-crimson)', border: '1px dashed rgba(239,68,68,0.2)', borderRadius: '6px', background: 'rgba(239,68,68,0.02)' }}>
+                    <Power size={32} style={{ margin: '0 auto 0.5rem', opacity: 0.6 }} />
+                    <p style={{ margin: 0, fontSize: '0.82rem', fontWeight: 600 }}>vPLC 통신 단선 상태입니다.</p>
+                    <p style={{ margin: '0.25rem 0 0', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>헤더의 vPLC ON 버튼을 눌러 기동해 주십시오.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="terminal-modal-footer" style={{ borderTopColor: 'rgba(255,255,255,0.05)' }}>
+              <button className="control-btn" onClick={() => setSelectedPlc(null)} style={{ padding: '0.35rem 1rem', fontSize: '0.8rem' }}>
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </div>
   );
 };

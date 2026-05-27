@@ -37,7 +37,7 @@ export function useSimulation() {
     processingTime: 1.8,  // takes 1.8s to process
     defectRate: 5.0,      // 5% defect rate
     systemSpeed: 1.0,     // 1x speed
-    plcMode: 'emulated'   // 'emulated' for browser-only, 'runtime' for vPLC C++
+    plcMode: 'dynamic'    // Set 'dynamic' (가변 멀티 공정) as the default mode upon reload!
   });
 
   const [items, setItems] = useState<Item[]>([]);
@@ -235,19 +235,23 @@ export function useSimulation() {
     setSettings(prev => ({ ...prev, plcMode: mode }));
     setIsRunning(false);
     setItems([]);
+    setDynamicPlcsData([]);
     
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      if (mode === 'dynamic') {
-        wsRef.current.send(JSON.stringify({ type: 'start_dynamic', count: dynamicStageCount }));
-      } else {
+      if (mode === 'emulated') {
         wsRef.current.send(JSON.stringify({ type: 'stop_dynamic' }));
+        wsRef.current.send(JSON.stringify({ type: 'stop_fixed' }));
+      } else if (mode === 'runtime') {
+        wsRef.current.send(JSON.stringify({ type: 'stop_dynamic' }));
+      } else if (mode === 'dynamic') {
+        wsRef.current.send(JSON.stringify({ type: 'stop_fixed' }));
       }
     }
     
     addLog(`동작 모드가 [${
       mode === 'emulated' ? '브라우저 에뮬' : mode === 'runtime' ? '기본 고정 공정' : '가변 멀티 공정'
     }] 모드로 변경되었습니다.`, 'info');
-  }, [dynamicStageCount, addLog]);
+  }, [addLog]);
 
   // Apply dynamic stage count action
   const applyDynamicStageCount = useCallback(() => {
@@ -269,8 +273,28 @@ export function useSimulation() {
     setDynamicPlcsData([]);
     
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'stop_dynamic' }));
-      addLog('🛑 [수동 정지 명령] 가변/고정 C++ vPLC 프로세스 일괄 정지 지시 송신 완료 (./vplc-dynamic-run.sh stop)', 'error');
+      if (stateRef.current.settings.plcMode === 'dynamic') {
+        wsRef.current.send(JSON.stringify({ type: 'stop_dynamic' }));
+        addLog('🛑 [수동 정지 명령] 가변 C++ vPLC 프로세스 일괄 정지 지시 송신 완료', 'error');
+      } else {
+        wsRef.current.send(JSON.stringify({ type: 'stop_fixed' }));
+        addLog('🛑 [수동 정지 명령] 고정 C++ vPLC 프로세스 일괄 정지 지시 송신 완료', 'error');
+      }
+    } else {
+      addLog('중계 게이트웨이 소켓 연결이 오프라인 상태입니다.', 'error');
+    }
+  }, [addLog]);
+
+  // Explicit start of all C++ vPLCs via gateway
+  const startAllPlcs = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      if (stateRef.current.settings.plcMode === 'dynamic') {
+        wsRef.current.send(JSON.stringify({ type: 'start_dynamic', count: stateRef.current.dynamicStageCount }));
+        addLog(`🚀 [수동 기동 명령] 가변 C++ vPLC 프로세스 기동 지시 송신 완료 (${stateRef.current.dynamicStageCount}대)`, 'success');
+      } else {
+        wsRef.current.send(JSON.stringify({ type: 'start_fixed' }));
+        addLog('🚀 [수동 기동 명령] 고정 C++ vPLC 프로세스 기동 지시 송신 완료 (4대)', 'success');
+      }
     } else {
       addLog('중계 게이트웨이 소켓 연결이 오프라인 상태입니다.', 'error');
     }
@@ -291,23 +315,14 @@ export function useSimulation() {
     addLog('Modbus/S7/MC/XGT 통합 게이트웨이(ws://localhost:4546) 연결 시도 중...', 'info');
 
     const connectWs = () => {
-      if (settings.plcMode !== 'runtime') return;
+      if (settings.plcMode !== 'runtime' && settings.plcMode !== 'dynamic') return;
 
       const ws = new WebSocket('ws://localhost:4546');
       wsRef.current = ws;
 
       ws.onopen = () => {
         addLog('🔌 중계 게이트웨이 소켓 연결에 성공했습니다.', 'success');
-        
-        if (stateRef.current.settings.plcMode === 'dynamic') {
-          ws.send(JSON.stringify({ type: 'start_dynamic', count: stateRef.current.dynamicStageCount }));
-        } else {
-          const speedValue = Math.round(stateRef.current.settings.conveyorSpeed * 150);
-          writePlcRegister('cnc', 1, speedValue);
-          writePlcRegister('sorter', 1, speedValue);
-        }
       };
-
       ws.onmessage = (event) => {
         try {
           const packet = JSON.parse(event.data);
@@ -330,7 +345,8 @@ export function useSimulation() {
 
             // 1. Feeder (PLC #1) Cargo: Spawn -> CNC Entrance
             const feederPos = pd.feeder.pos || 0;
-            if (pd.feeder.conveyor_run || feederPos > 0) {
+            const feederSerial = pd.feeder.serial || "";
+            if (pd.feeder.conveyor_run || feederPos > 0 || (feederSerial.trim() !== "")) {
               const progress = feederPos / 1000;
               const dx = PATH_COORDINATES.machineEntrance.x - PATH_COORDINATES.spawn.x;
               const x = PATH_COORDINATES.spawn.x + dx * progress;
@@ -350,7 +366,8 @@ export function useSimulation() {
 
             // 2. CNC Machine (PLC #2) Cargo: Processing or Conveyor 2 (CNC Exit -> QC Entrance)
             const cncPos = pd.cnc.pos || 0;
-            if (pd.cnc.conveyor_run || cncPos > 0) {
+            const cncSerial = pd.cnc.serial || "";
+            if (pd.cnc.conveyor_run || cncPos > 0 || (cncSerial.trim() !== "")) {
               if (cncPos <= 500) {
                 // Smoothly glide from CNC Entrance (230) to Spindle Center (280)
                 const progress = cncPos / 500;
@@ -390,7 +407,8 @@ export function useSimulation() {
             }
 
             // 3. QC (PLC #3) Cargo: Inspecting in M2
-            if (pd.qc.laser_on || pd.qc.conveyor_run) {
+            const qcSerial = pd.qc.serial || "";
+            if (pd.qc.laser_on || pd.qc.conveyor_run || (qcSerial.trim() !== "")) {
               activeItems.push({
                 id: 'ITEM-QC-CHECK',
                 serialNo: pd.qc.serial,
@@ -405,7 +423,8 @@ export function useSimulation() {
             }
 
             // 4. Sorter (PLC #4) Cargo: Warehouse transit
-            if (pd.sorter.conveyor_run) {
+            const sorterSerial = pd.sorter.serial || "";
+            if (pd.sorter.conveyor_run || (sorterSerial.trim() !== "")) {
               const progress = 0.5;
               const dx = PATH_COORDINATES.warehouse.x - PATH_COORDINATES.inspectExit.x;
               const dy = PATH_COORDINATES.warehouse.y - PATH_COORDINATES.inspectExit.y;
@@ -504,6 +523,51 @@ export function useSimulation() {
                 oee: count > 0 ? Math.round((onlineCount / count) * 100) : 100,
                 bottleneck: onlineCount < count ? '일부 가변 vPLC의 통신 단선 발생' : '모든 이기종 가변 공정 정상 연동 구동 중'
               }));
+
+              // --- DYNAMIC CARGO SECTOR MAPPER ---
+              const getLocalStageCoords = (sIdx: number) => {
+                const row = Math.floor(sIdx / 5);
+                const col = sIdx % 5;
+                const y = 55 + row * 95;
+                const isEvenRow = row % 2 === 0;
+                const x = isEvenRow ? (80 + col * 170) : (760 - col * 170);
+                return { x, y, isEvenRow };
+              };
+
+              const activeItems: Item[] = [];
+              plcs.forEach((p: any) => {
+                const pos = p.data.pos || 0;
+                const isRunningPlc = p.data.conveyor_run;
+                const serial = p.data.serial ? p.data.serial.trim() : "";
+                
+                // Enforce Serial Number Guard: only render chassis with valid scanned serial numbers!
+                if (serial !== "" && (isRunningPlc || pos > 0)) {
+                  const progress = pos / 1000;
+                  const pt1 = getLocalStageCoords(p.idx - 1);
+                  let pt2;
+                  if (p.idx === count) {
+                    pt2 = { x: pt1.isEvenRow ? pt1.x + 60 : pt1.x - 60, y: pt1.y };
+                  } else {
+                    pt2 = getLocalStageCoords(p.idx);
+                  }
+                  
+                  const x = pt1.x + (pt2.x - pt1.x) * progress;
+                  const y = pt1.y + (pt2.y - pt1.y) * progress;
+                  
+                  activeItems.push({
+                    id: `ITEM-DYNAMIC-${p.idx}`,
+                    serialNo: serial,
+                    spawnTime: Date.now(),
+                    status: isRunningPlc ? 'conveyor1' : 'processing',
+                    progress,
+                    quality: 'unknown',
+                    x,
+                    y,
+                    history: []
+                  });
+                }
+              });
+              setItems(activeItems);
             }
           }
         } catch (err) {
@@ -512,11 +576,13 @@ export function useSimulation() {
       };
 
       ws.onclose = () => {
-        if (settings.plcMode === 'runtime') {
-          setStats(prev => ({
-            ...prev,
-            plcConnections: { feeder: false, cnc: false, qc: false, sorter: false }
-          }));
+        if (settings.plcMode === 'runtime' || settings.plcMode === 'dynamic') {
+          if (settings.plcMode === 'runtime') {
+            setStats(prev => ({
+              ...prev,
+              plcConnections: { feeder: false, cnc: false, qc: false, sorter: false }
+            }));
+          }
           setTimeout(connectWs, 3000);
         }
       };
@@ -554,12 +620,26 @@ export function useSimulation() {
 
   // Manually feed raw material/chassis
   const feedMaterial = useCallback(() => {
-    const isLive = stateRef.current.settings.plcMode === 'runtime';
+    const mode = stateRef.current.settings.plcMode;
+    const isLive = (mode === 'runtime' || mode === 'dynamic');
     
     if (isLive) {
-      // Live HIL Mode: Send %MW2 = 1 force present signal to Feeder PLC #1
-      writePlcRegister('feeder', 2, 1);
-      addLog('[수동 투입 지시] PLC_01 Feeder에 Chassis Present 강제 주입 (%MW2 = 1)', 'info');
+      if (mode === 'dynamic') {
+        // Send manual injection trigger to dynamic PLC #1 (Modbus TCP)
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'write_dynamic_register',
+            idx: 1,
+            address: 2,
+            value: 1
+          }));
+          addLog('[수동 투입 지시] 가변 공정 #1 Warehouse에 원자재 투입 및 기동 지시 (%MW2 = 1)', 'info');
+        }
+      } else {
+        // Live HIL Mode: Send %MW2 = 1 force present signal to Feeder PLC #1
+        writePlcRegister('feeder', 2, 1);
+        addLog('[수동 투입 지시] PLC_01 Feeder에 Chassis Present 강제 주입 (%MW2 = 1)', 'info');
+      }
     } else {
       // Standalone Emulated Mode: Spawn item immediately
       const rawId = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -589,7 +669,7 @@ export function useSimulation() {
     let animationId: number;
 
     const tick = (time: number) => {
-      if (!stateRef.current.isRunning || stateRef.current.settings.plcMode === 'runtime') {
+      if (!stateRef.current.isRunning || stateRef.current.settings.plcMode === 'runtime' || stateRef.current.settings.plcMode === 'dynamic') {
         stateRef.current.lastTime = time;
         animationId = requestAnimationFrame(tick);
         return;
@@ -960,6 +1040,7 @@ export function useSimulation() {
     handleSpeedUpdate,
     feedMaterial,
     stopAllPlcs,
+    startAllPlcs,
     addLog
   };
 }

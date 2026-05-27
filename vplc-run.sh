@@ -145,33 +145,37 @@ start_plcs() {
     # 포트: 5020 + 10 = 5030
     echo "[Start] PLC #1: 투입기 (Feeder) 가동 -> Modbus TCP (Port 5030)"
     cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p modbus -o 10 assembly > "$LOG_DIR/plc1_feeder.log" 2>&1 < /dev/null &
+    nohup ./build/vPlc -p modbus -o 10 -w 8110 --headless ./build/libassembly_logic.so > "$LOG_DIR/plc1_feeder.log" 2>&1 < /dev/null &
     PLC1_PID=$!
     cd "$FACTORY_DIR" || exit 1
+    sleep 0.25
     
     # 2. PLC #2: CNC 가공 공정 (지멘스 S7)
     # 포트: 1020 + 20 = 1040
     echo "[Start] PLC #2: CNC가공 (CNC Mill) 가동 -> Siemens S7 (Port 1040)"
     cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p s7 -o 20 assembly > "$LOG_DIR/plc2_cnc.log" 2>&1 < /dev/null &
+    nohup ./build/vPlc -p s7 -o 20 -w 8120 --headless ./build/libassembly_logic.so > "$LOG_DIR/plc2_cnc.log" 2>&1 < /dev/null &
     PLC2_PID=$!
     cd "$FACTORY_DIR" || exit 1
+    sleep 0.25
     
     # 3. PLC #3: QC 검사 공정 (미쓰비시 MC)
     # 포트: 5011 + 30 = 5041
     echo "[Start] PLC #3: 비전QC (QC Vision) 가동 -> MELSEC MC (Port 5041)"
     cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p mc -o 30 assembly > "$LOG_DIR/plc3_qc.log" 2>&1 < /dev/null &
+    nohup ./build/vPlc -p mc -o 30 -w 8130 --headless ./build/libassembly_logic.so > "$LOG_DIR/plc3_qc.log" 2>&1 < /dev/null &
     PLC3_PID=$!
     cd "$FACTORY_DIR" || exit 1
+    sleep 0.25
     
     # 4. PLC #4: 출하 분류 공정 (LS Electric XGT)
     # 포트: 2004 + 40 = 2044
     echo "[Start] PLC #4: 출하분류 (Sorter) 가동 -> LS Electric XGT (Port 2044)"
     cd "$VPLC_DIR" || exit 1
-    nohup ./vPlc -p xgt -o 40 assembly > "$LOG_DIR/plc4_sorter.log" 2>&1 < /dev/null &
+    nohup ./build/vPlc -p xgt -o 40 -w 8140 --headless ./build/libassembly_logic.so > "$LOG_DIR/plc4_sorter.log" 2>&1 < /dev/null &
     PLC4_PID=$!
     cd "$FACTORY_DIR" || exit 1
+    sleep 0.25
     
     # PIDs 기록
     echo "$PLC1_PID" > "$PID_FILE"

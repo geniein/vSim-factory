@@ -56,9 +56,11 @@ function wordsToString(words) {
   let str = '';
   for (let i = 0; i < 5; i++) {
     const word = words[i] || 0;
+    if (word === 0) continue; // Skip empty register words
     const char1 = String.fromCharCode((word >> 8) & 0xFF);
     const char2 = String.fromCharCode(word & 0xFF);
-    str += char1 + char2;
+    if (char1 !== '\0') str += char1;
+    if (char2 !== '\0') str += char2;
   }
   // Keep serial format clean
   return str.trim();
@@ -111,6 +113,16 @@ function connectModbus() {
     log('MODBUS', `🟢 PLC #1 Feeder 연결 성공!`, colors.green);
     plcConnections.feeder = true;
     broadcastStatus();
+
+    // Configure Feeder as Slave (register 4 = 0) to prevent auto-spawning
+    setTimeout(async () => {
+      try {
+        if (plcConnections.feeder && modbusClient) {
+          await modbusClient.writeSingleRegister(4, 0);
+          log('MODBUS', '⚙️ PLC #1 Feeder (Slave Mode) 자동 세팅 완료', colors.green);
+        }
+      } catch (err) {}
+    }, 500);
   });
 
   modbusSocket.on('error', (err) => {
@@ -190,6 +202,15 @@ function connectS7() {
     log('S7', `🟢 PLC #2 CNC 연결 성공!`, colors.green);
     plcConnections.cnc = true;
     broadcastStatus();
+
+    // Auto-configure CNC as Follower (register 4 = 0 -> DB1,INT8)
+    setTimeout(() => {
+      if (plcConnections.cnc && s7Client) {
+        s7Client.writeItems('DB1,INT8', 0, (err) => {
+          if (!err) log('S7', '⚙️ PLC #2 CNC (Follower Mode) 자동 세팅 완료', colors.green);
+        });
+      }
+    }, 500);
     
     // Register variables for polling
     // DB1.DBX 272.0 represents Coil 0 (%QX0.0 Conveyor Run)
@@ -264,30 +285,62 @@ function connectMC() {
   log('MELSEC-MC', `PLC #3 QC 소켓 연결 시도 중 (${ip}:${port})...`, colors.blue);
 
   mcSocket = new net.Socket();
+  mcSocket.recvBuf = Buffer.alloc(0);
 
   mcSocket.on('connect', () => {
     log('MELSEC-MC', `🟢 PLC #3 QC 연결 성공!`, colors.green);
     plcConnections.qc = true;
     broadcastStatus();
+
+    // Auto-configure QC as Follower (register 4 = 0 -> MC.D.4)
+    setTimeout(() => {
+      if (plcConnections.qc && mcSocket) {
+        const header = Buffer.from([
+          0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x04, 0x00, 0x00, 0xA8, 0x01, 0x00
+        ]);
+        const valBuf = Buffer.from([0, 0]);
+        mcSocket.write(Buffer.concat([header, valBuf]));
+        log('MELSEC-MC', '⚙️ PLC #3 QC (Follower Mode) 자동 세팅 완료', colors.green);
+      }
+    }, 500);
   });
 
   mcSocket.on('data', (data) => {
-    // Parse QnA 3E Frame Response
-    // Header is 11 bytes. Remaining is read data block
-    if (data.length === 15) {
-      // D0: Completed Cars (2 bytes, little endian)
-      const d0_val = data[11] | (data[12] << 8);
-      
-      plcData.qc.completed = d0_val;
-      plcData.qc.conveyor_run = plcData.cnc.conveyor_run; // Synced with CNC conveyor
-      plcData.qc.laser_on = plcData.cnc.rotate_right;     // CNC arm rotate right maps to laser sweep in QC
-    } else if (data.length >= 21) {
-      // D10-D14 Serial No (5 words = 10 bytes)
-      const serialWords = [];
-      for (let i = 0; i < 5; i++) {
-        serialWords.push(data[11 + i*2] | (data[11 + i*2 + 1] << 8));
+    mcSocket.recvBuf = Buffer.concat([mcSocket.recvBuf, data]);
+
+    while (mcSocket.recvBuf.length >= 9) {
+      if (mcSocket.recvBuf[0] !== 0xD0 || mcSocket.recvBuf[1] !== 0x00) {
+        mcSocket.recvBuf = mcSocket.recvBuf.subarray(1);
+        continue;
       }
-      plcData.qc.serial = wordsToString(serialWords);
+
+      const length = mcSocket.recvBuf[7] | (mcSocket.recvBuf[8] << 8);
+      const packetLen = 9 + length;
+
+      if (mcSocket.recvBuf.length < packetLen) {
+        break;
+      }
+
+      const packet = mcSocket.recvBuf.subarray(0, packetLen);
+      mcSocket.recvBuf = mcSocket.recvBuf.subarray(packetLen);
+
+      const endCode = packet[9] | (packet[10] << 8);
+      if (endCode === 0) {
+        if (length === 0x06 || length === 6) {
+          // Completed Cars (D0, D1) read - 2 words = 4 bytes response (total length = 6)
+          const d0_val = packet[11] | (packet[12] << 8);
+          plcData.qc.completed = d0_val;
+          plcData.qc.conveyor_run = plcData.cnc.conveyor_run;
+          plcData.qc.laser_on = plcData.cnc.rotate_right;
+        } else if (length === 0x0A || length === 0x0C || length === 10 || length === 12) {
+          // D10-D14 Serial No (5 words = 10 bytes)
+          const serialWords = [];
+          for (let i = 0; i < 5; i++) {
+            serialWords.push(packet[11 + i*2] | (packet[11 + i*2 + 1] << 8));
+          }
+          plcData.qc.serial = wordsToString(serialWords);
+        }
+      }
     }
   });
 
@@ -346,6 +399,22 @@ function connectXGT() {
     log('LS-XGT', `🟢 PLC #4 Sorter 연결 성공!`, colors.green);
     plcConnections.sorter = true;
     broadcastStatus();
+
+    // Auto-configure Sorter as Follower (register 4 = 0 -> LS.W.4)
+    setTimeout(() => {
+      if (plcConnections.sorter && xgtSocket) {
+        const header = Buffer.from([
+          0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+        ]);
+        const body = Buffer.from([
+          0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x31,
+          0x02, 0x00, 0, 0
+        ]);
+        body.write(`%MW4`, 14);
+        xgtSocket.write(Buffer.concat([header, body]));
+        log('LS-XGT', '⚙️ PLC #4 Sorter (Follower Mode) 자동 세팅 완료', colors.green);
+      }
+    }, 500);
   });
 
   xgtSocket.on('data', (data) => {
@@ -439,8 +508,8 @@ async function runProcessBridge() {
   if (plcConnections.feeder && plcConnections.cnc) {
     const curFeederCompleted = plcData.feeder.completed;
     
-    // 최초 실행 시 또는 증가 시 감지
-    if (prevFeederCompleted !== -1 && curFeederCompleted > prevFeederCompleted) {
+    // 최초 실행 시 또는 증가 시 감지 (스캔 가드: 시리얼 번호가 비어 있지 않은 정식 차대만 이송!)
+    if (prevFeederCompleted !== -1 && curFeederCompleted > prevFeederCompleted && plcData.feeder.serial.trim() !== "") {
       log('BRIDGE', `Feeder ➔ CNC: 가공 Chassis Present (%MW2=1) 주입!`, colors.magenta);
       
       // [MES] Feeder의 시리얼을 읽어서 CNC의 DB1.DBW20~28에 복사!
@@ -471,7 +540,7 @@ async function runProcessBridge() {
   // ----------------------------------------------------
   if (plcConnections.cnc && plcConnections.qc && mcSocket) {
     const curCncCompleted = plcData.cnc.completed;
-    if (prevCncCompleted !== -1 && curCncCompleted > prevCncCompleted) {
+    if (prevCncCompleted !== -1 && curCncCompleted > prevCncCompleted && plcData.cnc.serial.trim() !== "") {
       log('BRIDGE', `CNC ➔ QC: 비전 Chassis Present (MC D2=1) 주입!`, colors.magenta);
       
       // [MES] CNC의 시리얼을 읽어서 QC(MC) D10~D14에 복사!
@@ -513,7 +582,7 @@ async function runProcessBridge() {
   // ----------------------------------------------------
   if (plcConnections.qc && plcConnections.sorter && xgtSocket) {
     const curQcCompleted = plcData.qc.completed;
-    if (prevQcCompleted !== -1 && curQcCompleted > prevQcCompleted) {
+    if (prevQcCompleted !== -1 && curQcCompleted > prevQcCompleted && plcData.qc.serial.trim() !== "") {
       log('BRIDGE', `QC ➔ Sorter: 분류 Chassis Present (XGT %MW2=1) 주입!`, colors.magenta);
       
       // [MES] QC의 시리얼을 읽어서 Sorter(XGT) %MW10~%MW14에 복사!
@@ -522,7 +591,7 @@ async function runProcessBridge() {
       for (let i = 0; i < 5; i++) {
         const addr = 10 + i;
         const xgtHeader = Buffer.from([
-          0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+          0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x17, 0x00
         ]);
         const xgtWriteBody = Buffer.from([
           0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x05, 0x00, 0x25, 0x4D, 0x57, 0x31, 0x30,
@@ -634,6 +703,17 @@ function connectDynamicPLC(plc) {
       plc.connecting = false;
       log('DYNAMIC-MODBUS', `🟢 Dynamic PLC #${plc.idx} Modbus (Port: ${plc.port}) 연결 성공!`, colors.green);
       broadcastDynamicStatus();
+
+      // Configure Feeder as Slave (0) to prevent auto-spawning in dynamic mode
+      const masterVal = 0;
+      setTimeout(async () => {
+        try {
+          if (plc.online && plc.client) {
+            await plc.client.writeSingleRegister(4, masterVal);
+            log('DYNAMIC-MODBUS', `⚙️ Dynamic PLC #${plc.idx} (Slave Mode) 자동 세팅 완료`, colors.green);
+          }
+        } catch (e) {}
+      }, 500);
     });
     
     plc.socket.on('error', () => {});
@@ -684,50 +764,94 @@ function connectDynamicPLC(plc) {
       plc.connecting = false;
       log('DYNAMIC-S7', `🟢 Dynamic PLC #${plc.idx} S7 (Port: ${plc.port}) 연결 성공!`, colors.green);
       broadcastDynamicStatus();
+
+      // Configure Follower (register 4 = DB1,INT8) to prevent auto-spawning in dynamic mode
+      const masterVal = 0;
+      setTimeout(() => {
+        if (plc.online && plc.client) {
+          plc.client.writeItems('DB1,INT8', masterVal, (err) => {
+            if (!err) log('DYNAMIC-S7', `⚙️ Dynamic PLC #${plc.idx} (Slave Mode) 자동 세팅 완료`, colors.green);
+          });
+        }
+      }, 500);
     });
   } 
   
   else if (plc.protocol === 'mc') {
     plc.socket = new net.Socket();
+    plc.recvBuf = Buffer.alloc(0);
     
     plc.socket.on('connect', () => {
       plc.online = true;
       plc.connecting = false;
       log('DYNAMIC-MC', `🟢 Dynamic PLC #${plc.idx} MC (Port: ${plc.port}) 연결 성공!`, colors.green);
       broadcastDynamicStatus();
+
+      // Auto-configure Follower (register 4 = MC.D.4) to prevent auto-spawning
+      const masterVal = 0;
+      setTimeout(() => {
+        if (plc.online && plc.socket) {
+          const header = Buffer.from([
+            0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x04, 0x00, 0x00, 0xA8, 0x01, 0x00
+          ]);
+          const valBuf = Buffer.from([masterVal & 0xFF, (masterVal >> 8) & 0xFF]);
+          plc.socket.write(Buffer.concat([header, valBuf]));
+          log('DYNAMIC-MC', `⚙️ Dynamic PLC #${plc.idx} (${masterVal ? 'Master' : 'Follower'} Mode) 자동 세팅 완료`, colors.green);
+        }
+      }, 500);
     });
     
     plc.socket.on('data', (data) => {
-      if (data.length >= 15) {
-        const subheader = data[0] | (data[1] << 8);
-        const length = data[7] | (data[8] << 8);
-        const endCode = data[9] | (data[10] << 8);
-        
+      plc.recvBuf = Buffer.concat([plc.recvBuf, data]);
+
+      while (plc.recvBuf.length >= 9) {
+        if (plc.recvBuf[0] !== 0xD0 || plc.recvBuf[1] !== 0x00) {
+          plc.recvBuf = plc.recvBuf.subarray(1);
+          continue;
+        }
+
+        const length = plc.recvBuf[7] | (plc.recvBuf[8] << 8);
+        const packetLen = 9 + length;
+
+        if (plc.recvBuf.length < packetLen) {
+          break;
+        }
+
+        const packet = plc.recvBuf.subarray(0, packetLen);
+        plc.recvBuf = plc.recvBuf.subarray(packetLen);
+
+        const endCode = packet[9] | (packet[10] << 8);
         if (endCode === 0) {
-          if (length === 0x08) { 
-            // Register read response: D0 (completed), D1 (speed)
-            const d0_val = data[11] | (data[12] << 8);
-            const d1_val = data[13] | (data[14] << 8);
-            plc.data.completed = d0_val;
-            plc.data.speed = d1_val;
-            
-            // MC PLC 인코더 속도에 기반한 자체 연산 위상동기(PLL)
-            if (plc.prevCompleted !== -1 && d0_val > plc.prevCompleted) {
-              plc.data.pos = 0;
-            }
-            plc.prevCompleted = d0_val;
-          } 
-          else if (length === 0x06) {
+          if (length === 0x06 || length === 6) {
             // Coil read response: Y0 (conveyor_run), Y6 (error)
-            const y0_run = (data[11] & 0x10) !== 0;
-            const y6_error = (data[14] & 0x10) !== 0;
+            const y0_run = (packet[11] & 0x10) !== 0;
+            const y6_error = (packet[14] & 0x10) !== 0;
             plc.data.conveyor_run = y0_run;
             plc.data.error = y6_error;
           }
-          else if (length === 0x0A) { // D10-D14 (10 bytes = 5 words)
+          else if (length === 0x14 || length === 20 || length === 18 || length === 0x08 || length === 8 || length === 6) { 
+            // Register read response: D0 (completed), D1 (speed), D8 (pos) - 9 words read length=20
+            const d0_val = packet[11] | (packet[12] << 8);
+            const d1_val = packet[13] | (packet[14] << 8);
+            plc.data.completed = d0_val;
+            plc.data.speed = d1_val;
+            
+            // If we successfully read 9 words (length=20), parse D8 mapped from MODBUS.IR.0
+            if (length >= 18 && packet.length >= 29) {
+              const d8_pos = packet[27] | (packet[28] << 8);
+              plc.data.pos = d8_pos;
+            } else {
+              // MC PLC 인코더 속도에 기반한 자체 연산 위상동기(PLL) 백업
+              if (plc.prevCompleted !== -1 && d0_val > plc.prevCompleted) {
+                plc.data.pos = 0;
+              }
+            }
+            plc.prevCompleted = d0_val;
+          } 
+          else if (length === 0x0A || length === 0x0C || length === 10 || length === 12) { // D10-D14 (10 bytes = 5 words)
             const serialWords = [];
             for (let i = 0; i < 5; i++) {
-              serialWords.push(data[11 + i*2] | (data[11 + i*2 + 1] << 8));
+              serialWords.push(packet[11 + i*2] | (packet[11 + i*2 + 1] << 8));
             }
             plc.data.serial = wordsToString(serialWords);
           }
@@ -759,6 +883,23 @@ function connectDynamicPLC(plc) {
       plc.connecting = false;
       log('DYNAMIC-XGT', `🟢 Dynamic PLC #${plc.idx} XGT (Port: ${plc.port}) 연결 성공!`, colors.green);
       broadcastDynamicStatus();
+
+      // Auto-configure Follower (register 4 = LS.W.4) to prevent auto-spawning
+      const masterVal = 0;
+      setTimeout(() => {
+        if (plc.online && plc.socket) {
+          const header = Buffer.from([
+            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+          ]);
+          const body = Buffer.from([
+            0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x31,
+            0x02, 0x00, masterVal & 0xFF, (masterVal >> 8) & 0xFF
+          ]);
+          body.write(`%MW4`, 14);
+          plc.socket.write(Buffer.concat([header, body]));
+          log('DYNAMIC-XGT', `⚙️ Dynamic PLC #${plc.idx} (${masterVal ? 'Master' : 'Follower'} Mode) 자동 세팅 완료`, colors.green);
+        }
+      }, 500);
     });
     
     plc.socket.on('data', (data) => {
@@ -866,9 +1007,9 @@ function pollDynamicPLCs() {
     } 
     
     else if (plc.protocol === 'mc' && plc.socket) {
-      // 1. D0-D1 Register read (D0 completed, D1 speed)
+      // 1. D0-D8 Register read (D0 completed, D1 speed, D8 encoder pos mapped from MODBUS.IR.0) - count 9 words (0x09)
       const reqRegs = Buffer.from([
-        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0C, 0x00, 0x10, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA8, 0x02, 0x00
+        0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0C, 0x00, 0x10, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA8, 0x09, 0x00
       ]);
       plc.socket.write(reqRegs);
       
@@ -892,11 +1033,7 @@ function pollDynamicPLCs() {
         }
       }, 50);
       
-      // 3. MC 인코더 위치 자체 시뮬레이션
-      if (plc.data.conveyor_run) {
-        const speed = plc.data.speed || 200;
-        plc.data.pos = (plc.data.pos + (speed * 0.1)) % 1000;
-      }
+      // Fixed: Removed gateway-side pos emulator, now using true D8 position mapped directly from C++ vPLC!
     } 
     
     else if (plc.protocol === 'xgt' && plc.socket) {
@@ -991,20 +1128,31 @@ async function runDynamicProcessBridge() {
     const nextPlc = dynamicPlcs[i + 1];
     const prevComp = prevDynamicCompleted[i];
     
-    if (prevComp !== -1 && curPlc.data.completed > prevComp) {
-      let serialStr = curPlc.data.serial || "          ";
-      if (i === 0 && serialStr.trim() === "") {
-        serialStr = generateSerialNo();
-        curPlc.data.serial = serialStr;
-        log('DYNAMIC-MES', `🆕 [MES 원자재 주입] Dynamic PLC #1 신규 시리얼 생성 ➡️ [${serialStr}]`, colors.green);
-        writeDynamicPlcSerial(curPlc, serialStr);
-      }
-      
+    const serialStr = curPlc.data.serial || "          ";
+    // 스캔 가드: 시리얼이 비어 있지 않은 정품 차대일 때만 다음 dynamic 공정으로 바통 이송!
+    if (prevComp !== -1 && curPlc.data.completed > prevComp && serialStr.trim() !== "") {
       log('DYNAMIC-MES', `공정 #${curPlc.idx} 완료 ➔ 공정 #${nextPlc.idx} (${nextPlc.protocol.toUpperCase()}): 시리얼 [${serialStr}] MES 이송!`, colors.magenta);
       writeDynamicPlcSerialAndTrigger(nextPlc, serialStr);
+      
+      // 물리적으로 다음 공정으로 이송되었으므로 이전 공정의 시리얼을 완전히 비운다
+      writeDynamicPlcSerial(curPlc, "          ");
+      curPlc.data.serial = "";
     }
     
     prevDynamicCompleted[i] = curPlc.data.completed;
+  }
+
+  // 최종 공정 완료 체크 및 시리얼 클리어
+  if (dynamicPlcCount > 0) {
+    const lastPlc = dynamicPlcs[dynamicPlcCount - 1];
+    const lastPrevComp = prevDynamicCompleted[dynamicPlcCount - 1];
+    const lastSerial = lastPlc.data.serial || "";
+    if (lastPrevComp !== -1 && lastPlc.data.completed > lastPrevComp && lastSerial.trim() !== "") {
+      log('DYNAMIC-MES', `🏁 [최종 공정 완료] 완성차 출하! 시리얼 [${lastSerial.trim()}]`, colors.green);
+      writeDynamicPlcSerial(lastPlc, "          ");
+      lastPlc.data.serial = "";
+    }
+    prevDynamicCompleted[dynamicPlcCount - 1] = lastPlc.data.completed;
   }
 }
 
@@ -1015,6 +1163,17 @@ async function writeDynamicPlcSerial(plc, serial) {
     for (let i = 0; i < 5; i++) {
       try { await plc.client.writeSingleRegister(10 + i, words[i]); } catch (e) {}
     }
+  } else if (plc.protocol === 's7' && plc.client) {
+    // S7 sequential callback chaining to prevent parallel write conflicts
+    plc.client.writeItems('DB1,INT20', words[0], () => {
+      plc.client.writeItems('DB1,INT22', words[1], () => {
+        plc.client.writeItems('DB1,INT24', words[2], () => {
+          plc.client.writeItems('DB1,INT26', words[3], () => {
+            plc.client.writeItems('DB1,INT28', words[4], () => {});
+          });
+        });
+      });
+    });
   }
 }
 
@@ -1035,15 +1194,20 @@ async function writeDynamicPlcSerialAndTrigger(plc, serial) {
   }
   
   else if (plc.protocol === 's7' && plc.client) {
-    plc.client.writeItems('DB1,INT20', words[0], () => {});
-    plc.client.writeItems('DB1,INT22', words[1], () => {});
-    plc.client.writeItems('DB1,INT24', words[2], () => {});
-    plc.client.writeItems('DB1,INT26', words[3], () => {});
-    plc.client.writeItems('DB1,INT28', words[4], () => {
-      plc.client.writeItems('DB1,INT4', 1, () => {
-        setTimeout(() => {
-          if (plc.online && plc.client) plc.client.writeItems('DB1,INT4', 0, () => {});
-        }, 1000);
+    // S7 sequential callback chaining to write serial words, then trigger DB1,INT4 with a 1-second reset pulse
+    plc.client.writeItems('DB1,INT20', words[0], () => {
+      plc.client.writeItems('DB1,INT22', words[1], () => {
+        plc.client.writeItems('DB1,INT24', words[2], () => {
+          plc.client.writeItems('DB1,INT26', words[3], () => {
+            plc.client.writeItems('DB1,INT28', words[4], () => {
+              plc.client.writeItems('DB1,INT4', 1, () => {
+                setTimeout(() => {
+                  if (plc.online && plc.client) plc.client.writeItems('DB1,INT4', 0, () => {});
+                }, 1000);
+              });
+            });
+          });
+        });
       });
     });
   }
@@ -1077,7 +1241,7 @@ async function writeDynamicPlcSerialAndTrigger(plc, serial) {
     for (let i = 0; i < 5; i++) {
       const addr = 10 + i;
       const header = Buffer.from([
-        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+        0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x17, 0x00
       ]);
       const xgtWriteBody = Buffer.from([
         0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x05, 0x00, 0x25, 0x4D, 0x57, 0x31, 0x30,
@@ -1248,41 +1412,101 @@ wss.on('connection', (ws) => {
         stopDynamicPLCs();
       }
       
+      else if (data.type === 'start_fixed') {
+        log('FIXED-CONTROL', `기본 고정 공정 vPLC 기동 지시 수신. C++ 프로세스 기동 중...`, colors.magenta);
+        
+        const { exec } = require('child_process');
+        exec(`./vplc-run.sh stop && ./vplc-run.sh start`, { cwd: __dirname + '/..' }, (err, stdout, stderr) => {
+          if (err) {
+            log('FIXED-CONTROL', `❌ C++ 고정 vPLC 구동 실패: ${err.message}`, colors.red);
+          } else {
+            log('FIXED-CONTROL', `🟢 C++ 고정 vPLC 구동 및 초기화 완료!`, colors.green);
+          }
+        });
+      }
+      
+      else if (data.type === 'stop_fixed') {
+        log('FIXED-CONTROL', `기본 고정 공정 vPLC 정지 지시 수신. C++ 프로세스 종료 중...`, colors.magenta);
+        
+        const { exec } = require('child_process');
+        exec(`./vplc-run.sh stop`, { cwd: __dirname + '/..' }, (err) => {
+          if (err) log('FIXED-CONTROL', `❌ C++ 고정 vPLC 정지 실패: ${err.message}`, colors.red);
+        });
+      }
+      
       // 2. Dynamic Register Write Command
       else if (data.type === 'write_dynamic_register') {
         const { idx, address, value } = data;
         const plc = dynamicPlcs.find(p => p.idx === idx);
         if (plc && plc.online) {
           const intVal = parseInt(value, 10);
-          log('DYNAMIC-WRITE', `Dynamic PLC #${idx} (${plc.protocol}) Register ${address} = ${value} 쓰기 지시 수신`, colors.magenta);
           
-          if (plc.protocol === 'modbus' && plc.client) {
-            await plc.client.writeSingleRegister(address, intVal);
-          } 
-          
-          else if (plc.protocol === 's7' && plc.client) {
-            plc.client.writeItems(`DB1,INT${address * 2}`, intVal, (err) => {
-              if (err) log('DYNAMIC-S7-WRITE', `S7 write error: ${err}`, colors.red);
-            });
-          } 
-          
-          else if (plc.protocol === 'mc' && plc.socket) {
-            const header = Buffer.from([
-              0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x01, 0x00, 0x00, 0xA8, 0x01, 0x00
-            ]);
-            const valBuf = Buffer.from([intVal & 0xFF, (intVal >> 8) & 0xFF]);
-            plc.socket.write(Buffer.concat([header, valBuf]));
-          } 
-          
-          else if (plc.protocol === 'xgt' && plc.socket) {
-            const header = Buffer.from([
-              0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
-            ]);
-            const body = Buffer.from([
-              0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x31,
-              0x02, 0x00, intVal & 0xFF, (intVal >> 8) & 0xFF
-            ]);
-            plc.socket.write(Buffer.concat([header, body]));
+          if (idx === 1 && address === 2 && intVal === 1) {
+            const newSerial = generateSerialNo();
+            log('DYNAMIC-MES', `🆕 [MES 원자재 주입] Dynamic PLC #1 신규 시리얼 생성 ➡️ [${newSerial}]`, colors.green);
+            plc.data.serial = newSerial;
+            
+            const words = stringToWords(newSerial);
+            // 1. Write serial to registers MW10-MW14 (Scan)
+            if (plc.protocol === 'modbus' && plc.client) {
+              for (let i = 0; i < 5; i++) {
+                try { await plc.client.writeSingleRegister(10 + i, words[i]); } catch (e) {}
+              }
+            } else if (plc.protocol === 's7' && plc.client) {
+              // S7 sequential callback chaining to prevent parallel write conflicts during raw chassis provisioning
+              plc.client.writeItems('DB1,INT20', words[0], () => {
+                plc.client.writeItems('DB1,INT22', words[1], () => {
+                  plc.client.writeItems('DB1,INT24', words[2], () => {
+                    plc.client.writeItems('DB1,INT26', words[3], () => {
+                      plc.client.writeItems('DB1,INT28', words[4], () => {});
+                    });
+                  });
+                });
+              });
+            }
+            
+            // 2. Trigger start after short delay
+            setTimeout(async () => {
+              if (plc.protocol === 'modbus' && plc.client) {
+                await plc.client.writeSingleRegister(2, 1);
+                setTimeout(async () => {
+                  try { if (plc.online && plc.client) await plc.client.writeSingleRegister(2, 0); } catch (e) {}
+                }, 1000);
+              } else if (plc.protocol === 's7' && plc.client) {
+                plc.client.writeItems('DB1,INT4', 1, () => {
+                  setTimeout(() => {
+                    if (plc.online && plc.client) plc.client.writeItems('DB1,INT4', 0, () => {});
+                  }, 1000);
+                });
+              }
+            }, 100);
+          } else {
+            log('DYNAMIC-WRITE', `Dynamic PLC #${idx} (${plc.protocol}) Register ${address} = ${value} 쓰기 지시 수신`, colors.magenta);
+            if (plc.protocol === 'modbus' && plc.client) {
+              await plc.client.writeSingleRegister(address, intVal);
+            } 
+            else if (plc.protocol === 's7' && plc.client) {
+              plc.client.writeItems(`DB1,INT${address * 2}`, intVal, (err) => {
+                if (err) log('DYNAMIC-S7-WRITE', `S7 write error: ${err}`, colors.red);
+              });
+            } 
+            else if (plc.protocol === 'mc' && plc.socket) {
+              const header = Buffer.from([
+                0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x01, 0x00, 0x00, 0xA8, 0x01, 0x00
+              ]);
+              const valBuf = Buffer.from([intVal & 0xFF, (intVal >> 8) & 0xFF]);
+              plc.socket.write(Buffer.concat([header, valBuf]));
+            } 
+            else if (plc.protocol === 'xgt' && plc.socket) {
+              const header = Buffer.from([
+                0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
+              ]);
+              const body = Buffer.from([
+                0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x31,
+                0x02, 0x00, intVal & 0xFF, (intVal >> 8) & 0xFF
+              ]);
+              plc.socket.write(Buffer.concat([header, body]));
+            }
           }
         }
       }
