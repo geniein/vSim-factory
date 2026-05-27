@@ -636,6 +636,17 @@ export function useSimulation() {
           addLog('[수동 투입 지시] 가변 공정 #1 Warehouse에 원자재 투입 및 기동 지시 (%MW2 = 1)', 'info');
         }
       } else {
+        // 인터록 감지: 이미 Feeder 공정에 화물이 이송 중일 때는 중복 주입 방지 차단! (방어적 타입 가드 적용)
+        const pd = stateRef.current.plcData;
+        const feederSerial = pd.feeder && (pd.feeder as any).serial ? String((pd.feeder as any).serial).trim() : "";
+        const feederPos = pd.feeder ? (pd.feeder.pos || 0) : 0;
+        const feederRun = pd.feeder ? (pd.feeder.conveyor_run || false) : false;
+        
+        if (feederSerial !== "" || feederPos > 0 || feederRun) {
+          addLog('⚠️ [원자재 투입 차단] 이미 Feeder 공정에 이송 중인 자재가 존재합니다. (인터록)', 'warning');
+          return;
+        }
+
         // Live HIL Mode: Send %MW2 = 1 force present signal to Feeder PLC #1
         writePlcRegister('feeder', 2, 1);
         addLog('[수동 투입 지시] PLC_01 Feeder에 Chassis Present 강제 주입 (%MW2 = 1)', 'info');

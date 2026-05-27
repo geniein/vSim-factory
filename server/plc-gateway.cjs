@@ -496,6 +496,7 @@ function pollXGT() {
 let prevFeederCompleted = -1;
 let prevCncCompleted = -1;
 let prevQcCompleted = -1;
+let prevSorterCompleted = -1;
 
 let cncChassisTriggered = false;
 let qcChassisTriggered = false;
@@ -515,13 +516,17 @@ async function runProcessBridge() {
       // [MES] Feeder의 시리얼을 읽어서 CNC의 DB1.DBW20~28에 복사!
       log('MES-BRIDGE', `Feeder ➔ CNC: 시리얼 넘버 [${plcData.feeder.serial}] MES Tracking 이송!`, colors.cyan);
       const words = stringToWords(plcData.feeder.serial);
-      s7Client.writeItems('DB1,INT20', words[0], (err) => {});
-      s7Client.writeItems('DB1,INT22', words[1], (err) => {});
-      s7Client.writeItems('DB1,INT24', words[2], (err) => {});
-      s7Client.writeItems('DB1,INT26', words[3], (err) => {});
-      s7Client.writeItems('DB1,INT28', words[4], (err) => {});
+      
+      // Siemens S7 일괄 쓰기(Batch Write)를 수행하여 소켓 뒤엉킴과 패킷 유실 방지!
+      s7Client.writeItems(
+        ['DB1,INT20', 'DB1,INT22', 'DB1,INT24', 'DB1,INT26', 'DB1,INT28'],
+        [words[0], words[1], words[2], words[3], words[4]],
+        (err) => {
+          if (err) log('S7-WRITE', `Siemens S7 batch serial write error: ${err}`, colors.red);
+        }
+      );
 
-      // CNC S7 Holding Register 2 (%MW2 - Chassis Present force) 에 1 기입 (address*2 = 4)
+      // CNC S7 Holding Register 2 (%MW2 - Chassis Present force) 에 1 기입 (address*2 = 4 -> DB1,INT4)
       s7Client.writeItems('DB1,INT4', 1, (err) => {
         if (!err) {
           // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
@@ -531,6 +536,18 @@ async function runProcessBridge() {
           }, 1000);
         }
       });
+
+      // [MES] 이송이 완료된 이전 공정(Feeder)의 시리얼 레지스터를 깨끗하게 리셋(0)하여 찌꺼기 렌더링 방지!
+      setTimeout(async () => {
+        try {
+          if (modbusClient && plcConnections.feeder) {
+            log('BRIDGE', `Feeder: 시리얼 넘버 [%MW10..14] 초기화 청소 완료`, colors.gray);
+            for (let i = 0; i < 5; i++) {
+              await modbusClient.writeSingleRegister(10 + i, 0);
+            }
+          }
+        } catch (err) {}
+      }, 500);
     }
     prevFeederCompleted = curFeederCompleted;
   }
@@ -573,6 +590,20 @@ async function runProcessBridge() {
           mcSocket.write(Buffer.concat([resetHeader, resetValBuf]));
         }
       }, 1000);
+
+      // [MES] 이송이 완료된 이전 공정(CNC S7)의 시리얼 레지스터를 깨끗하게 리셋(0)하여 찌꺼기 렌더링 방지!
+      setTimeout(() => {
+        if (plcConnections.cnc) {
+          log('BRIDGE', `CNC: 시리얼 넘버 [DB1,INT20..28] 초기화 청소 완료`, colors.gray);
+          s7Client.writeItems(
+            ['DB1,INT20', 'DB1,INT22', 'DB1,INT24', 'DB1,INT26', 'DB1,INT28'],
+            [0, 0, 0, 0, 0],
+            (err) => {
+              if (err) log('S7-WRITE', `CNC serial clear failed: ${err}`, colors.red);
+            }
+          );
+        }
+      }, 500);
     }
     prevCncCompleted = curCncCompleted;
   }
@@ -627,8 +658,50 @@ async function runProcessBridge() {
           xgtSocket.write(Buffer.concat([resetHeader, resetBody]));
         }
       }, 1000);
+
+      // [MES] 이송이 완료된 이전 공정(QC MC)의 시리얼 레지스터를 깨끗하게 리셋(0)하여 찌꺼기 렌더링 방지!
+      setTimeout(() => {
+        if (plcConnections.qc && mcSocket) {
+          log('BRIDGE', `QC: 시리얼 넘버 [D10..14] 초기화 청소 완료`, colors.gray);
+          const clearHeader = Buffer.from([
+            0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x16, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x0A, 0x00, 0x00, 0xA8, 0x05, 0x00
+          ]);
+          const clearBuf = Buffer.alloc(10); // 10 bytes of 0
+          mcSocket.write(Buffer.concat([clearHeader, clearBuf]));
+        }
+      }, 500);
     }
     prevQcCompleted = curQcCompleted;
+  }
+
+  // ----------------------------------------------------
+  // 4. Sorter (XGT) ➔ 출하 완료 및 시리얼 클리어
+  // ----------------------------------------------------
+  if (plcConnections.sorter && xgtSocket) {
+    const curSorterCompleted = plcData.sorter.completed;
+    if (prevSorterCompleted !== -1 && curSorterCompleted > prevSorterCompleted) {
+      log('BRIDGE', `Sorter: 출하 완료 감지 (%MW0=${curSorterCompleted})`, colors.magenta);
+      
+      // 출하가 끝난 Sorter XGT의 시리얼 넘버를 0으로 클리어
+      setTimeout(() => {
+        if (plcConnections.sorter && xgtSocket) {
+          log('BRIDGE', `Sorter: 시리얼 넘버 [%MW10..14] 초기화 청소 완료`, colors.gray);
+          for (let i = 0; i < 5; i++) {
+            const addr = 10 + i;
+            const xgtHeader = Buffer.from([
+              0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x17, 0x00
+            ]);
+            const xgtWriteBody = Buffer.from([
+              0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x05, 0x00, 0x25, 0x4D, 0x57, 0x31, 0x30,
+              0x02, 0x00, 0, 0
+            ]);
+            xgtWriteBody.write(`%MW${addr}`, 14);
+            xgtSocket.write(Buffer.concat([xgtHeader, xgtWriteBody]));
+          }
+        }
+      }, 1000); // 1초 대기 후 클리어 (출하 이펙트를 충분히 보여줌)
+    }
+    prevSorterCompleted = curSorterCompleted;
   }
 }
 
@@ -1520,6 +1593,16 @@ wss.on('connection', (ws) => {
           const intVal = parseInt(value, 10);
           
           if (address === 2 && intVal === 1) {
+            // 인터록 감지: 이미 Feeder에 화물이 있는 경우 주입 차단! (방어적 타입 가드 적용)
+            const feederSerial = plcData.feeder.serial ? String(plcData.feeder.serial).trim() : "";
+            const feederPos = plcData.feeder.pos || 0;
+            const feederRun = plcData.feeder.conveyor_run || false;
+            
+            if (feederSerial !== "" || feederPos > 0 || feederRun) {
+              log('MES-INTERLOCK', `⚠️ [주입 차단] 이미 Feeder 공정에 이송 중인 자재가 존재하므로 신규 투입을 차단합니다. (Serial: [${feederSerial}], Pos: ${feederPos}, Run: ${feederRun})`, colors.yellow);
+              return;
+            }
+            
             const newSerial = generateSerialNo();
             log('MES', `🆕 [MES 원자재 주입] 신규 차량 생성! 시리얼 부여 ➡️ [${newSerial}]`, colors.green);
             const words = stringToWords(newSerial);
