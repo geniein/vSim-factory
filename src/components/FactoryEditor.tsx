@@ -947,6 +947,175 @@ export const FactoryEditor: React.FC<FactoryEditorProps> = ({ onNavigateToMySim 
                 </div>
               )}
 
+              {/* vPLC Integration Section */}
+              <div className="vplc-integration-section" style={{ borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.75rem', marginTop: '1rem', marginBottom: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', margin: 0 }}>
+                    <Cpu size={13} className="text-neon-purple" />
+                    vPLC 연동 활성화
+                  </label>
+                  <input 
+                    type="checkbox"
+                    checked={activeNode.parameters.vplcEnabled || false}
+                    onChange={(e) => updateNodeParameter('vplcEnabled', e.target.checked)}
+                    className="inspector-checkbox"
+                    style={{ cursor: 'pointer' }}
+                  />
+                </div>
+
+                {activeNode.parameters.vplcEnabled && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'rgba(139, 92, 246, 0.05)', borderRadius: '6px', border: '1px solid rgba(139, 92, 246, 0.15)', marginTop: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <div style={{ flex: 2 }}>
+                        <label className="field-label" style={{ fontSize: '0.6rem', marginBottom: '2px' }}>IP 주소</label>
+                        <input 
+                          type="text"
+                          placeholder="127.0.0.1"
+                          value={activeNode.parameters.vplcIp || '127.0.0.1'}
+                          onChange={(e) => updateNodeParameter('vplcIp', e.target.value)}
+                          className="inspector-input"
+                          style={{ fontSize: '0.7rem', padding: '4px 6px', height: '24px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '4px' }}
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label className="field-label" style={{ fontSize: '0.6rem', marginBottom: '2px' }}>PORT</label>
+                        <input 
+                          type="number"
+                          placeholder="502"
+                          value={activeNode.parameters.vplcPort || 502}
+                          onChange={(e) => updateNodeParameter('vplcPort', Number(e.target.value))}
+                          className="inspector-input"
+                          style={{ fontSize: '0.7rem', padding: '4px 6px', height: '24px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '4px' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="field-label" style={{ fontSize: '0.65rem', color: '#cbd5e1', marginBottom: '4px', display: 'block', fontWeight: 'bold' }}>특성 Memory 맵핑 설정</label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {activeNode.type === 'feeder' && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                            <span style={{ color: '#94a3b8' }}>소재 공급 Cycle (feedRate)</span>
+                            <input 
+                              type="text"
+                              value={activeNode.parameters.vplcMapping_feedRate || '%MW1'}
+                              onChange={(e) => updateNodeParameter('vplcMapping_feedRate', e.target.value)}
+                              placeholder="%MW1"
+                              className="inspector-input"
+                              style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                            />
+                          </div>
+                        )}
+                        {activeNode.type === 'press' && (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                              <span style={{ color: '#94a3b8' }}>목표치 압력 (targetPressure)</span>
+                              <input 
+                                type="text"
+                                value={activeNode.parameters.vplcMapping_targetPressure || '%IW0'}
+                                onChange={(e) => updateNodeParameter('vplcMapping_targetPressure', e.target.value)}
+                                placeholder="%IW0"
+                                className="inspector-input"
+                                style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                              <span style={{ color: '#94a3b8' }}>성형 가공 시간 (cycleDuration)</span>
+                              <input 
+                                type="text"
+                                value={activeNode.parameters.vplcMapping_cycleDuration || '%MW2'}
+                                onChange={(e) => updateNodeParameter('vplcMapping_cycleDuration', e.target.value)}
+                                placeholder="%MW2"
+                                className="inspector-input"
+                                style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                            </div>
+                          </>
+                        )}
+                        {activeNode.type === 'weld_robot' && (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                              <span style={{ color: '#94a3b8' }}>방전 전류 강도 (arcCurrent)</span>
+                              <input 
+                                type="text"
+                                value={activeNode.parameters.vplcMapping_arcCurrent || '%IW1'}
+                                onChange={(e) => updateNodeParameter('vplcMapping_arcCurrent', e.target.value)}
+                                placeholder="%IW1"
+                                className="inspector-input"
+                                style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                              <span style={{ color: '#94a3b8' }}>용접 가공 시간 (cycleDuration)</span>
+                              <input 
+                                type="text"
+                                value={activeNode.parameters.vplcMapping_cycleDuration || '%MW3'}
+                                onChange={(e) => updateNodeParameter('vplcMapping_cycleDuration', e.target.value)}
+                                placeholder="%MW3"
+                                className="inspector-input"
+                                style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                            </div>
+                          </>
+                        )}
+                        {activeNode.type === 'paint_spray' && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                            <span style={{ color: '#94a3b8' }}>토출 압력 (nozzlePressure)</span>
+                            <input 
+                              type="text"
+                              value={activeNode.parameters.vplcMapping_nozzlePressure || '%IW2'}
+                              onChange={(e) => updateNodeParameter('vplcMapping_nozzlePressure', e.target.value)}
+                              placeholder="%IW2"
+                              className="inspector-input"
+                              style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                            />
+                          </div>
+                        )}
+                        {activeNode.type === 'drying_oven' && (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                              <span style={{ color: '#94a3b8' }}>목표치 온도 (targetTemp)</span>
+                              <input 
+                                type="text"
+                                value={activeNode.parameters.vplcMapping_targetTemp || '%IW3'}
+                                onChange={(e) => updateNodeParameter('vplcMapping_targetTemp', e.target.value)}
+                                placeholder="%IW3"
+                                className="inspector-input"
+                                style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                              <span style={{ color: '#94a3b8' }}>도막 베이킹 타임 (cycleDuration)</span>
+                              <input 
+                                type="text"
+                                value={activeNode.parameters.vplcMapping_cycleDuration || '%MW4'}
+                                onChange={(e) => updateNodeParameter('vplcMapping_cycleDuration', e.target.value)}
+                                placeholder="%MW4"
+                                className="inspector-input"
+                                style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                            </div>
+                          </>
+                        )}
+                        {activeNode.type === 'storage_rack' && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                            <span style={{ color: '#94a3b8' }}>창고 용량 (storageCapacity)</span>
+                            <input 
+                              type="text"
+                              value={activeNode.parameters.vplcMapping_storageCapacity || '%MW5'}
+                              onChange={(e) => updateNodeParameter('vplcMapping_storageCapacity', e.target.value)}
+                              placeholder="%MW5"
+                              className="inspector-input"
+                              style={{ width: '80px', fontSize: '0.68rem', padding: '2px 4px', height: '20px', background: '#090d16', border: '1px solid rgba(255,255,255,0.1)', color: '#a855f7', borderRadius: '3px', textAlign: 'center', fontWeight: 'bold' }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Action Buttons inside inspector */}
               <button 
                 onClick={handleDeleteNode}

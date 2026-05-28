@@ -949,7 +949,29 @@ export const SimulatorCanvas: React.FC<SimulatorCanvasProps> = ({
               </g>
 
               {/* STATION 5: SCRAP YARD / DEFECTIVE CONTAINER */}
-              <g transform={`translate(${PATH_COORDINATES.scrapyard.x - 30}, ${PATH_COORDINATES.scrapyard.y - 35})`}>
+              <g
+                transform={`translate(${PATH_COORDINATES.scrapyard.x - 30}, ${PATH_COORDINATES.scrapyard.y - 35})`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => setSelectedPlc({
+                  idx: 5,
+                  protocol: 'modbus',
+                  port: 5035,
+                  online: isRunning,
+                  data: {
+                    conveyor_run: isRunning,
+                    pos: 0,
+                    speed: Math.round(settings.conveyorSpeed * 150),
+                    completed: items.filter(i => i.quality === 'defective' || i.status === 'defective').length,
+                    serial: 'SCRAP_TRASH',
+                    error: false
+                  },
+                  color: 'var(--color-error-crimson)',
+                  role: {
+                    name: '불량품 폐기 처리장 (Defective Scrap Processing Yard)',
+                    desc: 'QC 비전 검사 판정 결과, 허용 오차 범위를 초과하여 치수 또는 표면 불량으로 판정된 불합격 차체를 분류 적재하고 압착 폐기하는 공정 구역입니다.'
+                  }
+                })}
+              >
                 <rect
                   width="70"
                   height="70"

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, Pause, RotateCcw, AlertTriangle, Cpu, CheckCircle, 
-  Zap, MonitorPlay, Activity, Settings 
+  Zap, MonitorPlay, Activity, Settings, Sliders 
 } from 'lucide-react';
 
 interface Node {
@@ -62,6 +62,20 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
 
   // Machine operational states
   const [nodesActiveStatus, setNodesActiveStatus] = useState<Record<string, 'RUN' | 'STOP'>>({});
+
+  // Modal States
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  // Periodic state refresh for Modal Live registers
+  const [modalTick, setModalTick] = useState(0);
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const interval = setInterval(() => {
+      setModalTick(t => t + 1);
+    }, 400);
+    return () => clearInterval(interval);
+  }, [isModalOpen]);
   
   const nodeWidth = 76;
   const nodeHeight = 52;
@@ -105,6 +119,43 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
     };
     window.addEventListener('resize', handleResize);
 
+    // Helper to dynamically read parameters (simulating live vPLC register readings with realistic fluctuations)
+    const getNodeParameter = (node: Node, paramName: string, defaultValue: number | string) => {
+      if (node.parameters.vplcEnabled) {
+        const mappingKey = `vplcMapping_${paramName}`;
+        const mapping = node.parameters[mappingKey];
+        if (mapping) {
+          const baseline = Number(node.parameters[paramName] || defaultValue);
+          const timeSec = Date.now() / 1000;
+          
+          if (paramName === 'feedRate') {
+            // feedRate range 2.0 to 8.0, fluctuates
+            const offset = Math.sin(timeSec * 0.5) * 1.5;
+            return Math.max(2.0, Math.min(8.0, baseline + offset));
+          } else if (paramName === 'cycleDuration') {
+            // cycle duration fluctuates slightly, e.g. 1 to 6s
+            const offset = Math.sin(timeSec * 0.7) * 0.8;
+            return Math.max(1.0, Math.min(6.0, baseline + offset));
+          } else if (paramName === 'targetPressure') {
+            const offset = Math.sin(timeSec * 0.3) * 12;
+            return Math.round(baseline + offset);
+          } else if (paramName === 'arcCurrent') {
+            const offset = Math.cos(timeSec * 0.6) * 8;
+            return Math.round(baseline + offset);
+          } else if (paramName === 'nozzlePressure') {
+            const offset = Math.sin(timeSec * 0.45) * 0.4;
+            return Math.max(3.0, Math.min(6.0, baseline + offset));
+          } else if (paramName === 'targetTemp') {
+            const offset = Math.sin(timeSec * 0.25) * 5;
+            return Math.round(baseline + offset);
+          } else if (paramName === 'storageCapacity') {
+            return Math.round(baseline);
+          }
+        }
+      }
+      return node.parameters[paramName] || defaultValue;
+    };
+
     // Discrete-Event Simulation Materials State
     const activeMaterials: Material[] = [];
     let materialSpawnersTimer: Record<string, number> = {};
@@ -112,7 +163,7 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
     // Initialize spawner frame countdowns
     layout.nodes.forEach(n => {
       if (n.type === 'feeder') {
-        const rate = n.parameters.feedRate || 4.0;
+        const rate = getNodeParameter(n, 'feedRate', 4.0) as number;
         materialSpawnersTimer[n.id] = Math.round(600 / rate); // Spawn frame interval (60fps based)
       }
     });
@@ -463,7 +514,7 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
             // Tick countdown
             materialSpawnersTimer[n.id] -= 1 * speedMultiplier;
             if (materialSpawnersTimer[n.id] <= 0) {
-              const rate = n.parameters.feedRate || 4.0;
+              const rate = getNodeParameter(n, 'feedRate', 4.0) as number;
               materialSpawnersTimer[n.id] = Math.round(600 / rate); // reset
 
               // Check if output connection exists
@@ -564,7 +615,7 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
                 nodesOccupyingMatId[targetNode.id] = m.id;
                 
                 // Fetch cycle time configured by user (default to 2s)
-                const sec = targetNode.parameters.cycleDuration || 2;
+                const sec = getNodeParameter(targetNode, 'cycleDuration', 2) as number;
                 m.processFramesLeft = Math.round(sec * 60);
               }
             }
@@ -625,7 +676,7 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
             nodesOccupyingMatId[m.currentNodeId] = m.id;
             
             const nodeObj = layout.nodes.find(n => n.id === m.currentNodeId);
-            const sec = nodeObj?.parameters.cycleDuration || 2;
+            const sec = nodeObj ? getNodeParameter(nodeObj, 'cycleDuration', 2) as number : 2;
             m.processFramesLeft = Math.round(sec * 60);
           }
         }
@@ -644,6 +695,50 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
       window.removeEventListener('resize', handleResize);
     };
   }, [layout, isRunning, speedMultiplier, nodesActiveStatus]);
+
+  // Canvas Click Handler to open Detailed Modal
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !layout) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Find if a node was clicked
+    const clickedNode = layout.nodes.find(n => {
+      return (
+        x >= n.x - nodeWidth/2 &&
+        x <= n.x + nodeWidth/2 &&
+        y >= n.y - nodeHeight/2 &&
+        y <= n.y + nodeHeight/2
+      );
+    });
+
+    if (clickedNode) {
+      setSelectedNode(clickedNode);
+      setIsModalOpen(true);
+    }
+  };
+
+  // Change cursor to pointer when hovering over a node
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas || !layout) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const hoveringNode = layout.nodes.some(n => {
+      return (
+        x >= n.x - nodeWidth/2 &&
+        x <= n.x + nodeWidth/2 &&
+        y >= n.y - nodeHeight/2 &&
+        y <= n.y + nodeHeight/2
+      );
+    });
+
+    canvas.style.cursor = hoveringNode ? 'pointer' : 'default';
+  };
 
   // VPLC operational status switch handler
   const handleSimPlcToggle = (nodeId: string) => {
@@ -839,7 +934,12 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
         </div>
 
         <div className="mimic-canvas-wrapper" style={{ height: '390px' }}>
-          <canvas ref={canvasRef} className="mimic-canvas" />
+          <canvas 
+            ref={canvasRef} 
+            className="mimic-canvas" 
+            onClick={handleCanvasClick}
+            onMouseMove={handleCanvasMouseMove}
+          />
         </div>
       </div>
 
@@ -892,7 +992,296 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
       {/* Floating Success Toast notification */}
       <div id="sim-toast" className="editor-toast font-mono-tech success"></div>
 
+      {/* Detailed Diagnostics Modal */}
+      {isModalOpen && selectedNode && (
+        <div className="mysim-modal-overlay font-mono-tech">
+          <div className="mysim-modal-box glass-panel">
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Cpu size={18} className="text-neon-purple" />
+                <h3 style={{ margin: 0, color: '#fff', fontSize: '1.05rem', fontWeight: 800 }}>
+                  {selectedNode.label} 상세 진단반
+                </h3>
+              </div>
+              <button 
+                onClick={() => { setIsModalOpen(false); setSelectedNode(null); }}
+                style={{ background: 'transparent', border: 'none', color: '#64748b', fontSize: '1.2rem', cursor: 'pointer', outline: 'none' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div className="modal-status-badge-row">
+                <span className="field-label">VPLC 상태:</span>
+                <span className={`status-badge ${(nodesActiveStatus[`${selectedNode.id}_VPLC`] || 'RUN').toLowerCase()}`}>
+                  {nodesActiveStatus[`${selectedNode.id}_VPLC`] || 'RUN'}
+                </span>
+              </div>
+
+              <div className="modal-details-grid">
+                <div className="diag-entry">
+                  <span className="diag-label">설비 식별 ID</span>
+                  <span className="diag-val">{selectedNode.id}</span>
+                </div>
+                <div className="diag-entry">
+                  <span className="diag-label">가상 PLC 노드</span>
+                  <span className="diag-val">{selectedNode.id}_VPLC</span>
+                </div>
+                <div className="diag-entry">
+                  <span className="diag-label">연동 통신 포트</span>
+                  <span className="diag-val" style={{ color: selectedNode.parameters.vplcEnabled ? '#c084fc' : '#ffffff' }}>
+                    {selectedNode.parameters.vplcEnabled ? `Modbus-TCP ${selectedNode.parameters.vplcPort || 502}` : 'Modbus-TCP 502'}
+                  </span>
+                </div>
+                <div className="diag-entry">
+                  <span className="diag-label">네트워크 지연율</span>
+                  <span className="diag-val text-neon-green">
+                    {selectedNode.parameters.vplcEnabled ? '2 ms (LIVE)' : '3 ms (SECURE)'}
+                  </span>
+                </div>
+              </div>
+
+              {/* IP display if vPLC enabled */}
+              {selectedNode.parameters.vplcEnabled && (
+                <div className="diag-entry flex-row" style={{ padding: '0.35rem 0.5rem', background: 'rgba(139, 92, 246, 0.08)', borderRadius: '4px', border: '1px solid rgba(139, 92, 246, 0.15)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem' }}>
+                  <span className="diag-label" style={{ color: '#c084fc', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ color: modalTick % 2 === 0 ? 'var(--color-active-green)' : '#4b5563', transition: 'color 0.2s', fontSize: '12px' }}>●</span>
+                    vPLC LIVE ADDRESS
+                  </span>
+                  <span className="diag-val" style={{ fontFamily: 'monospace', color: '#c084fc' }}>
+                    {selectedNode.parameters.vplcIp || '127.0.0.1'}:{selectedNode.parameters.vplcPort || 502}
+                  </span>
+                </div>
+              )}
+
+              <div className="panel-title" style={{ fontSize: '0.78rem', color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: '4px', margin: '0.5rem 0 0.25rem 0', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Sliders size={12} className="text-neon-cyan" />
+                <span>원격 설비 파라미터 (Baseline 세팅값)</span>
+              </div>
+
+              <div className="modal-params-list">
+                {Object.entries(selectedNode.parameters)
+                  .filter(([key]) => !key.startsWith('vplc'))
+                  .map(([key, val]) => (
+                    <div key={key} className="diag-entry flex-row">
+                      <span className="diag-label" style={{ textTransform: 'capitalize' }}>
+                        {key.replace(/([A-Z])/g, ' $1')}
+                      </span>
+                      <span className="diag-val text-neon-cyan">
+                        {typeof val === 'number' ? val.toFixed(1) : String(val)}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+
+              {/* vPLC Memory Mapping & Live Value Retrieval HUD */}
+              {selectedNode.parameters.vplcEnabled ? (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div className="panel-title" style={{ fontSize: '0.78rem', color: '#c084fc', borderBottom: '1px solid rgba(139,92,246,0.15)', paddingBottom: '4px', margin: '0.5rem 0 0.25rem 0', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Cpu size={12} className="text-neon-purple" />
+                    <span>vPLC 실시간 메모리 맵핑 관제 HUD</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', background: 'rgba(139, 92, 246, 0.04)', border: '1px solid rgba(139, 92, 246, 0.15)', borderRadius: '6px', padding: '6px' }}>
+                    
+                    {Object.entries(selectedNode.parameters)
+                      .filter(([k]) => k.startsWith('vplcMapping_'))
+                      .map(([key, mappingVal]) => {
+                        const paramName = key.replace('vplcMapping_', '');
+                        const mappingRegister = String(mappingVal);
+                        
+                        // Fetch baseline and calculate live dynamic value
+                        const baseline = selectedNode.parameters[paramName];
+                        let liveVal = baseline;
+                        const timeSec = Date.now() / 1000;
+                        if (paramName === 'feedRate') {
+                          const offset = Math.sin(timeSec * 0.5) * 1.5;
+                          liveVal = Math.max(2.0, Math.min(8.0, Number(baseline || 4) + offset));
+                        } else if (paramName === 'cycleDuration') {
+                          const offset = Math.sin(timeSec * 0.7) * 0.8;
+                          liveVal = Math.max(1.0, Math.min(6.0, Number(baseline || 2) + offset));
+                        } else if (paramName === 'targetPressure') {
+                          const offset = Math.sin(timeSec * 0.3) * 12;
+                          liveVal = Math.round(Number(baseline || 210) + offset);
+                        } else if (paramName === 'arcCurrent') {
+                          const offset = Math.cos(timeSec * 0.6) * 8;
+                          liveVal = Math.round(Number(baseline || 120) + offset);
+                        } else if (paramName === 'nozzlePressure') {
+                          const offset = Math.sin(timeSec * 0.45) * 0.4;
+                          liveVal = Math.max(3.0, Math.min(6.0, Number(baseline || 4.5) + offset));
+                        } else if (paramName === 'targetTemp') {
+                          const offset = Math.sin(timeSec * 0.25) * 5;
+                          liveVal = Math.round(Number(baseline || 110) + offset);
+                        } else if (paramName === 'storageCapacity') {
+                          liveVal = Math.round(Number(baseline || 36));
+                        }
+
+                        // Display format
+                        const displayLiveVal = typeof liveVal === 'number' ? liveVal.toFixed(1) : String(liveVal);
+                        const displayUnit = paramName === 'feedRate' ? '회 (10s)' : paramName === 'targetPressure' ? 'Bar' : paramName === 'arcCurrent' ? 'A' : paramName === 'nozzlePressure' ? 'Bar' : paramName === 'targetTemp' ? '°C' : paramName === 'storageCapacity' ? 'Pallets' : '초';
+                        
+                        let paramLabel = paramName;
+                        if (paramName === 'feedRate') paramLabel = '소재 공급 Cycle';
+                        else if (paramName === 'cycleDuration') paramLabel = '가공 소요 시간';
+                        else if (paramName === 'targetPressure') paramLabel = '목표치 압력';
+                        else if (paramName === 'arcCurrent') paramLabel = '전류 강도';
+                        else if (paramName === 'nozzlePressure') paramLabel = '노즐 압력';
+                        else if (paramName === 'targetTemp') paramLabel = '건조 온도';
+                        else if (paramName === 'storageCapacity') paramLabel = '보관 용량';
+
+                        return (
+                          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', padding: '3px 6px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.02)', borderRadius: '4px' }}>
+                            <span style={{ color: '#cbd5e1', fontSize: '0.68rem' }}>{paramLabel} <span style={{ color: '#a855f7', fontWeight: 'bold', fontFamily: 'monospace' }}>[{mappingRegister}]</span></span>
+                            <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#c084fc' }}>
+                              ⚡ {displayLiveVal} {displayUnit}
+                            </span>
+                          </div>
+                        );
+                      })
+                    }
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', gap: '10px', marginTop: '1.25rem' }}>
+                <button
+                  onClick={() => handleSimPlcToggle(selectedNode.id)}
+                  className={`speed-btn ${ (nodesActiveStatus[`${selectedNode.id}_VPLC`] || 'RUN') === 'RUN' ? 'active' : '' }`}
+                  style={{ 
+                    flex: 1, 
+                    fontSize: '0.75rem', 
+                    padding: '0.55rem', 
+                    borderColor: (nodesActiveStatus[`${selectedNode.id}_VPLC`] || 'RUN') === 'RUN' ? '#ef4444' : '#10b981',
+                    color: (nodesActiveStatus[`${selectedNode.id}_VPLC`] || 'RUN') === 'RUN' ? '#f87171' : '#10b981',
+                    fontWeight: 'bold',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {(nodesActiveStatus[`${selectedNode.id}_VPLC`] || 'RUN') === 'RUN' ? '⚙ 원격 STOP' : '⚙ 원격 RUN'}
+                </button>
+                
+                <button
+                  onClick={() => { setIsModalOpen(false); setSelectedNode(null); }}
+                  className="speed-btn"
+                  style={{ flex: 1, fontSize: '0.75rem', padding: '0.55rem', borderColor: 'rgba(255,255,255,0.1)', color: '#94a3b8', cursor: 'pointer' }}
+                >
+                  닫기 (CLOSE)
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       <style>{`
+        /* Modal Overlay Styling */
+        .mysim-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100vw;
+          height: 100vh;
+          background: rgba(2, 4, 10, 0.85);
+          backdrop-filter: blur(5px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 300;
+          animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        .mysim-modal-box {
+          background: rgba(13, 20, 38, 0.95);
+          border: 1px solid rgba(139, 92, 246, 0.35);
+          border-radius: 14px;
+          padding: 1.75rem;
+          width: 90%;
+          max-width: 440px;
+          box-shadow: 0 15px 40px rgba(0, 0, 0, 0.8), 0 0 25px rgba(139, 92, 246, 0.1);
+        }
+
+        .modal-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          padding-bottom: 0.75rem;
+          margin-bottom: 1rem;
+        }
+
+        .modal-status-badge-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 0.5rem;
+          font-size: 0.78rem;
+        }
+
+        .status-badge {
+          font-size: 0.68rem;
+          font-weight: 700;
+          padding: 2px 7px;
+          border-radius: 4px;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+        }
+
+        .status-badge.run {
+          background: rgba(16, 185, 129, 0.15);
+          color: var(--color-active-green);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .status-badge.stop {
+          background: rgba(239, 68, 68, 0.15);
+          color: var(--color-error-crimson);
+          border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .modal-details-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 0.75rem;
+          background: rgba(4, 6, 14, 0.4);
+          padding: 0.75rem;
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,0.02);
+        }
+
+        .diag-entry {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+
+        .diag-entry.flex-row {
+          flex-direction: row;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0.35rem 0.5rem;
+          background: rgba(255,255,255,0.015);
+          border-radius: 4px;
+        }
+
+        .diag-label {
+          font-size: 0.65rem;
+          color: var(--text-muted);
+        }
+
+        .diag-val {
+          font-size: 0.75rem;
+          font-weight: 700;
+          color: #ffffff;
+        }
+
+        .modal-params-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.45rem;
+        }
+
         .mysim-dashboard-container {
           display: flex;
           flex-direction: column;
