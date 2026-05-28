@@ -79,6 +79,10 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
 
   // Live WebSocket Connection to Gateway (ws://localhost:4546) for Custom vPLCs
   const [liveVplcData, setLiveVplcData] = useState<Record<string, { online: boolean; values: Record<string, number> }>>({});
+  const liveVplcDataRef = useRef(liveVplcData);
+  useEffect(() => {
+    liveVplcDataRef.current = liveVplcData;
+  }, [liveVplcData]);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -88,6 +92,10 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
     const hasVplc = layout.nodes.some(n => n.parameters.vplcEnabled);
     if (!hasVplc) {
       setLiveVplcData({});
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
       return;
     }
 
@@ -111,19 +119,43 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
         layoutId: 'vsim_custom_layout',
         plcs: layout.nodes
           .filter(n => n.parameters.vplcEnabled)
-          .map(n => ({
-            nodeId: n.id,
-            protocol: 'modbus',
-            ip: n.parameters.vplcIp || '127.0.0.1',
-            port: n.parameters.vplcPort || 502,
-            mappings: Object.entries(n.parameters)
+          .map(n => {
+            const defaultMappings: Record<string, string> = {};
+            if (n.type === 'feeder') {
+              defaultMappings['feedRate'] = '%MW1';
+            } else if (n.type === 'press') {
+              defaultMappings['targetPressure'] = '%IW0';
+              defaultMappings['cycleDuration'] = '%MW2';
+            } else if (n.type === 'weld_robot') {
+              defaultMappings['arcCurrent'] = '%IW1';
+              defaultMappings['cycleDuration'] = '%MW3';
+            } else if (n.type === 'paint_spray') {
+              defaultMappings['nozzlePressure'] = '%IW2';
+            } else if (n.type === 'drying_oven') {
+              defaultMappings['targetTemp'] = '%IW3';
+              defaultMappings['cycleDuration'] = '%MW4';
+            } else if (n.type === 'storage_rack') {
+              defaultMappings['storageCapacity'] = '%MW5';
+            }
+
+            const mappings = Object.entries(n.parameters)
               .filter(([k]) => k.startsWith('vplcMapping_'))
               .reduce((acc, [k, v]) => {
                 const paramName = k.replace('vplcMapping_', '');
                 acc[paramName] = v;
                 return acc;
-              }, {} as Record<string, any>)
-          }))
+              }, {} as Record<string, any>);
+
+            const mergedMappings = { ...defaultMappings, ...mappings };
+
+            return {
+              nodeId: n.id,
+              protocol: 'modbus',
+              ip: n.parameters.vplcIp || '127.0.0.1',
+              port: n.parameters.vplcPort || 502,
+              mappings: mergedMappings
+            };
+          })
       };
       try {
         socket.send(JSON.stringify(regPacket));
@@ -202,8 +234,8 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
     // Helper to dynamically read parameters (prioritizing live C++ vPLC hardware registers, falling back to local simulation)
     const getNodeParameter = (node: Node, paramName: string, defaultValue: number | string) => {
       // 1. If vPLC has sent real-time hardware values from the socket, prioritize using them
-      if (node.parameters.vplcEnabled && liveVplcData[node.id]?.online) {
-        const liveVal = liveVplcData[node.id].values?.[paramName];
+      if (node.parameters.vplcEnabled && liveVplcDataRef.current[node.id]?.online) {
+        const liveVal = liveVplcDataRef.current[node.id].values?.[paramName];
         if (liveVal !== undefined && liveVal !== null) {
           return liveVal;
         }
@@ -637,9 +669,13 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
             if (plcState === 'STOP') return;
 
             // Tick countdown
+            const rate = getNodeParameter(n, 'feedRate', 4.0) as number;
+            if (rate <= 0) {
+              // If feed rate is 0 or less, freeze the spawner on the spot!
+              return;
+            }
             materialSpawnersTimer[n.id] -= 1 * speedMultiplier;
             if (materialSpawnersTimer[n.id] <= 0) {
-              const rate = getNodeParameter(n, 'feedRate', 4.0) as number;
               materialSpawnersTimer[n.id] = Math.round(600 / rate); // reset
 
               // Check if output connection exists
@@ -753,6 +789,36 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
           const nodePlc = nodesActiveStatus[`${m.currentNodeId}_VPLC`] || 'RUN';
 
           if (node && nodePlc === 'RUN') {
+            // Check if any critical parameter of the machine is 0 or less (from vPLC)
+            let isMachineStopped = false;
+            if (node.type === 'press') {
+              const press = getNodeParameter(node, 'targetPressure', 210) as number;
+              const dur = getNodeParameter(node, 'cycleDuration', 3) as number;
+              if (press <= 0 || dur <= 0) isMachineStopped = true;
+            } else if (node.type === 'weld_robot') {
+              const curr = getNodeParameter(node, 'arcCurrent', 120) as number;
+              const dur = getNodeParameter(node, 'cycleDuration', 2) as number;
+              if (curr <= 0 || dur <= 0) isMachineStopped = true;
+            } else if (node.type === 'paint_spray') {
+              const press = getNodeParameter(node, 'nozzlePressure', 4.5) as number;
+              if (press <= 0) isMachineStopped = true;
+            } else if (node.type === 'drying_oven') {
+              const temp = getNodeParameter(node, 'targetTemp', 110) as number;
+              const dur = getNodeParameter(node, 'cycleDuration', 4) as number;
+              if (temp <= 0 || dur <= 0) isMachineStopped = true;
+            } else if (node.type === 'storage_rack') {
+              const cap = getNodeParameter(node, 'storageCapacity', 36) as number;
+              if (cap <= 0) isMachineStopped = true;
+            }
+
+            if (isMachineStopped) {
+              // Freeze processing on the spot! Do not decrement processFramesLeft
+              m.x = node.x;
+              m.y = node.y;
+              drawMaterialPayload(m);
+              continue;
+            }
+
             m.processFramesLeft -= 1 * speedMultiplier;
             m.x = node.x;
             m.y = node.y;
@@ -991,6 +1057,31 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
             <span>Field bus: Modbus-TCP Handshake</span>
           </div>
         </div>
+
+        {layout.nodes.some(n => n.parameters.vplcEnabled) && (
+          <div className="glass-panel telemetry-card mysim-glow" style={{
+            borderColor: Object.values(liveVplcData).some(p => p.online) ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+            boxShadow: Object.values(liveVplcData).some(p => p.online) ? '0 0 15px rgba(16, 185, 129, 0.15)' : 'none'
+          }}>
+            <div className="telemetry-header">
+              <Cpu size={14} style={{ color: Object.values(liveVplcData).some(p => p.online) ? 'var(--color-active-green)' : '#f87171' }} />
+              <span>vPLC INTEGRATION</span>
+            </div>
+            <div className="telemetry-value" style={{ 
+              color: Object.values(liveVplcData).some(p => p.online) ? 'var(--color-active-green)' : '#fca5a5',
+              fontSize: '1.25rem',
+              fontWeight: 800
+            }}>
+              {Object.values(liveVplcData).some(p => p.online) ? 'ONLINE' : 'CONNECTING...'}
+            </div>
+            <div className="telemetry-footer" style={{ display: 'flex', justifyContent: 'space-between', width: '100%', fontSize: '0.68rem' }}>
+              <span>Gateway: ws://localhost:4546</span>
+              <span style={{ color: '#c084fc' }}>
+                {Object.values(liveVplcData).filter(p => p.online).length} / {layout.nodes.filter(n => n.parameters.vplcEnabled).length} Online
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main Playback Controllers */}
@@ -1217,20 +1308,28 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
                       </span>
                     </div>
 
-                    {Object.entries(selectedNode.parameters)
-                      .filter(([k]) => k.startsWith('vplcMapping_'))
-                      .map(([key, mappingVal]) => {
-                        const paramName = key.replace('vplcMapping_', '');
-                        const mappingRegister = String(mappingVal);
-                        
-                        // Fetch baseline and calculate live dynamic value (prioritizing live websocket registers)
+                    {(() => {
+                      const paramDefs: Record<string, Record<string, string>> = {
+                        feeder: { feedRate: '%MW1' },
+                        press: { targetPressure: '%IW0', cycleDuration: '%MW2' },
+                        weld_robot: { arcCurrent: '%IW1', cycleDuration: '%MW3' },
+                        paint_spray: { nozzlePressure: '%IW2' },
+                        drying_oven: { targetTemp: '%IW3', cycleDuration: '%MW4' },
+                        storage_rack: { storageCapacity: '%MW5' }
+                      };
+                      
+                      const nodeType = selectedNode.type;
+                      const defs = paramDefs[nodeType] || {};
+                      
+                      return Object.entries(defs).map(([paramName, defaultReg]) => {
+                        const mappingRegister = String(selectedNode.parameters[`vplcMapping_${paramName}`] || defaultReg);
                         const baseline = selectedNode.parameters[paramName];
                         let liveVal = baseline;
                         
-                        if (liveVplcData[selectedNode.id]?.online && liveVplcData[selectedNode.id].values?.[paramName] !== undefined && liveVplcData[selectedNode.id].values?.[paramName] !== null) {
-                          liveVal = liveVplcData[selectedNode.id].values[paramName];
+                        const rawLive = liveVplcData[selectedNode.id]?.online ? liveVplcData[selectedNode.id].values?.[paramName] : undefined;
+                        if (rawLive !== undefined && rawLive !== null) {
+                          liveVal = rawLive;
                         } else {
-                          // Fallback to simulated fluctuation
                           const timeSec = Date.now() / 1000;
                           if (paramName === 'feedRate') {
                             const offset = Math.sin(timeSec * 0.5) * 1.5;
@@ -1255,7 +1354,6 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
                           }
                         }
 
-                        // Display format
                         const displayLiveVal = typeof liveVal === 'number' ? liveVal.toFixed(1) : String(liveVal);
                         const displayUnit = paramName === 'feedRate' ? '회 (10s)' : paramName === 'targetPressure' ? 'Bar' : paramName === 'arcCurrent' ? 'A' : paramName === 'nozzlePressure' ? 'Bar' : paramName === 'targetTemp' ? '°C' : paramName === 'storageCapacity' ? 'Pallets' : '초';
                         
@@ -1269,15 +1367,29 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
                         else if (paramName === 'storageCapacity') paramLabel = '보관 용량';
 
                         return (
-                          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', padding: '3px 6px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.02)', borderRadius: '4px' }}>
+                          <div key={paramName} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', padding: '3px 6px', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.02)', borderRadius: '4px' }}>
                             <span style={{ color: '#cbd5e1', fontSize: '0.68rem' }}>{paramLabel} <span style={{ color: '#a855f7', fontWeight: 'bold', fontFamily: 'monospace' }}>[{mappingRegister}]</span></span>
                             <span style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#c084fc' }}>
                               ⚡ {displayLiveVal} {displayUnit}
                             </span>
                           </div>
                         );
-                      })
-                    }
+                      });
+                    })()}
+                  </div>
+                  
+                  {/* 디버그용 실시간 로우 데이터 모니터링 HUD */}
+                  <div style={{ marginTop: '8px', padding: '6px', background: 'rgba(0,0,0,0.3)', borderRadius: '4px', border: '1px dashed rgba(168, 85, 247, 0.3)' }}>
+                    <div style={{ fontSize: '0.62rem', color: '#a855f7', fontWeight: 'bold', marginBottom: '3px' }}>🔍 [DEBUG] FRONTEND WEBSOCKET STATE</div>
+                    <pre style={{ margin: 0, padding: 0, fontSize: '0.58rem', fontFamily: 'monospace', color: '#38bdf8', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                      {JSON.stringify({
+                        selectedNodeId: selectedNode.id,
+                        selectedNodeLabel: selectedNode.label,
+                        liveVplcDataKeys: Object.keys(liveVplcData),
+                        targetNodeLiveData: liveVplcData[selectedNode.id] || null,
+                        allRawTelemetry: liveVplcData
+                      }, null, 2)}
+                    </pre>
                   </div>
                 </div>
               ) : null}

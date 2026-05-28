@@ -89,6 +89,8 @@ const plcConnections = {
   sorter: false
 };
 
+let isFixedPlcActive = false; // 기본 고정 PLC 활성화 여부 플래그
+
 const plcData = {
   feeder: { conveyor_run: false, pos: 0, completed: 0, speed: 200, error: false, serial: "          " },
   cnc:    { conveyor_run: false, lift_down: false, clamp_on: false, rotate_right: false, speed: 200, pos: 0, completed: 0, error: false, serial: "          " },
@@ -103,6 +105,7 @@ let modbusClient = null;
 let modbusSocket = null;
 
 function connectModbus() {
+  if (!isFixedPlcActive) return;
   const { ip, port } = PLC_CONFIGS.feeder;
   log('MODBUS', `PLC #1 Feeder 소켓 연결 시도 중 (${ip}:${port})...`, colors.blue);
   
@@ -137,7 +140,9 @@ function connectModbus() {
       plcConnections.feeder = false;
       broadcastStatus();
     }
-    setTimeout(connectModbus, 3000); // 3초 후 재연결 시도
+    if (isFixedPlcActive) {
+      setTimeout(connectModbus, 3000); // 3초 후 재연결 시도
+    }
   });
 
   modbusSocket.connect({ host: ip, port: port });
@@ -184,6 +189,7 @@ async function pollModbus() {
 const s7Client = new nodes7();
 
 function connectS7() {
+  if (!isFixedPlcActive) return;
   const { ip, port } = PLC_CONFIGS.cnc;
   log('S7', `PLC #2 CNC 소켓 연결 시도 중 (${ip}:${port})...`, colors.blue);
 
@@ -195,7 +201,9 @@ function connectS7() {
       }
       plcConnections.cnc = false;
       broadcastStatus();
-      setTimeout(connectS7, 3000);
+      if (isFixedPlcActive) {
+        setTimeout(connectS7, 3000);
+      }
       return;
     }
 
@@ -251,7 +259,9 @@ function pollS7() {
       s7Client.dropConnection(() => {
         plcConnections.cnc = false;
         broadcastStatus();
-        setTimeout(connectS7, 3000);
+        if (isFixedPlcActive) {
+          setTimeout(connectS7, 3000);
+        }
       });
       return;
     }
@@ -281,6 +291,7 @@ function pollS7() {
 let mcSocket = null;
 
 function connectMC() {
+  if (!isFixedPlcActive) return;
   const { ip, port } = PLC_CONFIGS.qc;
   log('MELSEC-MC', `PLC #3 QC 소켓 연결 시도 중 (${ip}:${port})...`, colors.blue);
 
@@ -356,7 +367,9 @@ function connectMC() {
       plcConnections.qc = false;
       broadcastStatus();
     }
-    setTimeout(connectMC, 3000);
+    if (isFixedPlcActive) {
+      setTimeout(connectMC, 3000);
+    }
   });
 
   mcSocket.connect({ host: ip, port: port });
@@ -390,6 +403,7 @@ let xgtSocket = null;
 let xgtSerialWords = [0, 0, 0, 0, 0];
 
 function connectXGT() {
+  if (!isFixedPlcActive) return;
   const { ip, port } = PLC_CONFIGS.sorter;
   log('LS-XGT', `PLC #4 Sorter 소켓 연결 시도 중 (${ip}:${port})...`, colors.blue);
 
@@ -453,7 +467,9 @@ function connectXGT() {
       plcConnections.sorter = false;
       broadcastStatus();
     }
-    setTimeout(connectXGT, 3000);
+    if (isFixedPlcActive) {
+      setTimeout(connectXGT, 3000);
+    }
   });
 
   xgtSocket.connect({ host: ip, port: port });
@@ -1319,13 +1335,229 @@ async function writeDynamicPlcSerialAndTrigger(plc, serial) {
 }
 
 // ------------------------------------------------------------------------------
+// CUSTOM DESIGNED LAYOUT PLC CONNECTION POOL
+// ------------------------------------------------------------------------------
+let customPlcs = [];
+let customTelemetryInterval = null;
+
+function startCustomPLCs(plcsList) {
+  stopCustomPLCs();
+  
+  log('CUSTOM-POOL', `커스텀 공정 vPLC 연동 시작... 총 연동 개수: ${plcsList.length}`, colors.cyan);
+  
+  customPlcs = plcsList.map(p => {
+    return {
+      nodeId: p.nodeId,
+      protocol: p.protocol || 'modbus',
+      ip: p.ip || '127.0.0.1',
+      port: p.port || 502,
+      mappings: p.mappings || {},
+      online: false,
+      connecting: false,
+      socket: null,
+      client: null,
+      values: {}
+    };
+  });
+  
+  customPlcs.forEach(connectCustomPLC);
+  
+  // Start custom telemetry broadcast loop every 100ms
+  customTelemetryInterval = setInterval(broadcastCustomTelemetry, 100);
+}
+
+function stopCustomPLCs() {
+  if (customTelemetryInterval) {
+    clearInterval(customTelemetryInterval);
+    customTelemetryInterval = null;
+  }
+  
+  if (customPlcs.length > 0) {
+    log('CUSTOM-POOL', `기존 커스텀 vPLC 연결 일괄 종료 및 정리 중...`, colors.yellow);
+    customPlcs.forEach(plc => {
+      plc.online = false;
+      plc.connecting = false;
+      if (plc.socket) {
+        try { plc.socket.destroy(); } catch (e) {}
+        plc.socket = null;
+      }
+      if (plc.client) {
+        if (plc.protocol === 's7') {
+          try { plc.client.dropConnection(() => {}); } catch (e) {}
+        }
+        plc.client = null;
+      }
+    });
+    customPlcs = [];
+  }
+}
+
+function connectCustomPLC(plc) {
+  if (plc.online || plc.connecting) return;
+  plc.connecting = true;
+  
+  log('CUSTOM-PLC', `[연동 시도] 커스텀 노드 [${plc.nodeId}] (${plc.protocol.toUpperCase()}) ➔ ${plc.ip}:${plc.port}`, colors.magenta);
+  
+  if (plc.protocol === 'modbus') {
+    plc.socket = new net.Socket();
+    plc.client = new modbus.client.TCP(plc.socket);
+    
+    plc.socket.on('connect', () => {
+      plc.online = true;
+      plc.connecting = false;
+      log('CUSTOM-MODBUS', `🟢 커스텀 PLC [${plc.nodeId}] Modbus (Port: ${plc.port}) 연결 성공!`, colors.green);
+      pollCustomModbus(plc);
+    });
+    
+    plc.socket.on('error', (err) => {
+      plc.connecting = false;
+    });
+    
+    plc.socket.on('close', () => {
+      plc.online = false;
+      plc.connecting = false;
+      // Reconnect after 3s if still in custom pool
+      if (customPlcs.some(p => p.nodeId === plc.nodeId)) {
+        setTimeout(() => connectCustomPLC(plc), 3000);
+      }
+    });
+    
+    plc.socket.connect({ host: plc.ip, port: plc.port });
+  } 
+  
+  else if (plc.protocol === 's7') {
+    plc.client = new nodes7();
+    plc.client.initiateConnection({ host: plc.ip, port: plc.port, rack: 0, slot: 1 }, (err) => {
+      plc.connecting = false;
+      if (err) {
+        if (customPlcs.some(p => p.nodeId === plc.nodeId)) {
+          setTimeout(() => connectCustomPLC(plc), 3000);
+        }
+        return;
+      }
+      
+      plc.online = true;
+      log('CUSTOM-S7', `🟢 커스텀 PLC [${plc.nodeId}] Siemens S7 (Port: ${plc.port}) 연결 성공!`, colors.green);
+      pollCustomS7(plc);
+    });
+  }
+}
+
+async function pollCustomModbus(plc) {
+  if (!plc.online || !plc.client) return;
+  
+  const values = { ...plc.values };
+  for (const [paramName, registerAddr] of Object.entries(plc.mappings)) {
+    try {
+      const regStr = String(registerAddr);
+      const isCoil = regStr.toLowerCase().startsWith('%qx') || regStr.toLowerCase().startsWith('m');
+      const isInput = regStr.toLowerCase().startsWith('%iw') || regStr.toLowerCase().startsWith('i');
+      
+      const numMatch = regStr.match(/\d+/);
+      const regIdx = numMatch ? parseInt(numMatch[0], 10) : 0;
+      
+      if (isCoil) {
+        const resp = await plc.client.readCoils(regIdx, 1);
+        values[paramName] = resp.response.body.valuesAsArray[0] ? 1 : 0;
+      } else if (isInput) {
+        const resp = await plc.client.readInputRegisters(regIdx, 1);
+        values[paramName] = resp.response.body.valuesAsArray[0] || 0;
+      } else {
+        const resp = await plc.client.readHoldingRegisters(regIdx, 1);
+        values[paramName] = resp.response.body.valuesAsArray[0] || 0;
+      }
+    } catch (err) {
+      log('CUSTOM-POLL-ERROR', `⚠️ [${plc.nodeId}] Register ${registerAddr} 읽기 실패: ${err.message}`, colors.yellow);
+    }
+  }
+  plc.values = values;
+  log('CUSTOM-DEBUG', `📥 [${plc.nodeId}] Mappings: ${JSON.stringify(plc.mappings)} -> Polled Values: ${JSON.stringify(plc.values)}`, colors.cyan);
+  
+  if (plc.online && customPlcs.some(p => p.nodeId === plc.nodeId)) {
+    setTimeout(() => pollCustomModbus(plc), 150);
+  }
+}
+
+function pollCustomS7(plc) {
+  if (!plc.online || !plc.client) return;
+  
+  // Simulate polling or add S7 read items if needed
+  const values = {};
+  for (const [paramName] of Object.entries(plc.mappings)) {
+    // Siemens S7 simulated telemetry fluctuation
+    const baseline = paramName === 'feedRate' ? 4.5 : paramName === 'targetTemp' ? 110 : 3;
+    values[paramName] = baseline + Math.sin(Date.now() / 1000) * 0.5;
+  }
+  plc.values = values;
+  
+  if (plc.online && customPlcs.some(p => p.nodeId === plc.nodeId)) {
+    setTimeout(() => pollCustomS7(plc), 200);
+  }
+}
+
+function broadcastCustomTelemetry() {
+  const payload = {
+    type: 'custom_plc_telemetry',
+    timestamp: Date.now(),
+    data: {}
+  };
+  
+  customPlcs.forEach(plc => {
+    payload.data[plc.nodeId] = {
+      online: plc.online,
+      values: plc.values
+    };
+  });
+  
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify(payload));
+    }
+  });
+}
+
+function stopFixedPLCs() {
+  isFixedPlcActive = false;
+  
+  // 1. Modbus
+  if (modbusSocket) {
+    try { modbusSocket.destroy(); } catch (e) {}
+    modbusSocket = null;
+    modbusClient = null;
+  }
+  plcConnections.feeder = false;
+  
+  // 2. S7
+  if (plcConnections.cnc && s7Client) {
+    try { s7Client.dropConnection(() => {}); } catch(e) {}
+  }
+  plcConnections.cnc = false;
+  
+  // 3. MC
+  if (mcSocket) {
+    try { mcSocket.destroy(); } catch (e) {}
+    mcSocket = null;
+  }
+  plcConnections.qc = false;
+  
+  // 4. XGT
+  if (xgtSocket) {
+    try { xgtSocket.destroy(); } catch (e) {}
+    xgtSocket = null;
+  }
+  plcConnections.sorter = false;
+  
+  broadcastStatus();
+}
+
+// ------------------------------------------------------------------------------
 
 setInterval(async () => {
   if (dynamicPlcCount > 0) {
     pollDynamicPLCs();
     await runDynamicProcessBridge();
     broadcastDynamicData();
-  } else {
+  } else if (isFixedPlcActive) {
     pollModbus();
     pollS7();
     pollMC();
@@ -1456,8 +1688,17 @@ wss.on('connection', (ws) => {
       }
       
       else if (data.type === 'start_fixed') {
-        log('FIXED-CONTROL', `기본 고정 공정 vPLC 기동 지시 수신. C++ 프로세스 기동 중...`, colors.magenta);
+        log('FIXED-CONTROL', `기본 고정 공정 vPLC 기동 지시 수신. C++ 프로세스 기동 및 소켓 연결 개시...`, colors.magenta);
         
+        stopDynamicPLCs();
+        stopCustomPLCs();
+        
+        isFixedPlcActive = true;
+        connectModbus();
+        connectS7();
+        connectMC();
+        connectXGT();
+
         const { exec } = require('child_process');
         exec(`./vplc-run.sh stop && ./vplc-run.sh start`, { cwd: __dirname + '/..' }, (err, stdout, stderr) => {
           if (err) {
@@ -1469,12 +1710,23 @@ wss.on('connection', (ws) => {
       }
       
       else if (data.type === 'stop_fixed') {
-        log('FIXED-CONTROL', `기본 고정 공정 vPLC 정지 지시 수신. C++ 프로세스 종료 중...`, colors.magenta);
+        log('FIXED-CONTROL', `기본 고정 공정 vPLC 정지 지시 수신. 소켓 연결 차단 및 C++ 프로세스 종료...`, colors.magenta);
         
+        stopFixedPLCs();
+
         const { exec } = require('child_process');
         exec(`./vplc-run.sh stop`, { cwd: __dirname + '/..' }, (err) => {
           if (err) log('FIXED-CONTROL', `❌ C++ 고정 vPLC 정지 실패: ${err.message}`, colors.red);
         });
+      }
+
+      else if (data.type === 'register_custom_plcs') {
+        log('CUSTOM-CONTROL', `커스텀 레이아웃 vPLC 연동 지시 수신. 기존 소켓 정리 및 신규 커넥션 풀 기동...`, colors.magenta);
+        const plcsList = data.plcs || [];
+        
+        stopFixedPLCs();
+        stopDynamicPLCs();
+        startCustomPLCs(plcsList);
       }
       
       // 2. Dynamic Register Write Command
@@ -1617,7 +1869,10 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    log('WS-HUB', '리액트 시뮬레이션 브라우저의 연결이 해제되었습니다.', colors.yellow);
+    log('WS-HUB', '리액트 시뮬레이션 브라우저의 연결이 해제되었습니다. 모든 PLC 연결을 해제합니다.', colors.yellow);
+    stopCustomPLCs();
+    stopFixedPLCs();
+    stopDynamicPLCs();
   });
 });
 
@@ -1629,10 +1884,5 @@ server.listen(WS_PORT, () => {
   log('START', `🔌 vPLC 이기종 프로토콜 통합 WebSocket 게이트웨이 기동 완료`, colors.cyan);
   log('START', `   - 웹소켓 서버 포트: ws://localhost:${WS_PORT}`, colors.cyan);
   log('START', `========================================================`, colors.cyan);
-  
-  connectModbus();
-  connectS7();
-  connectMC();
-  connectXGT();
 });
 
