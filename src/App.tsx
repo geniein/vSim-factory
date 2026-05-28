@@ -12,6 +12,8 @@ import { IqisDashboard } from './components/IqisDashboard';
 import { FmsDashboard } from './components/FmsDashboard';
 import { CmmsDashboard } from './components/CmmsDashboard';
 import { WmsDashboard } from './components/WmsDashboard';
+import { FactoryEditor } from './components/FactoryEditor';
+import { MySimDashboard } from './components/MySimDashboard';
 import './App.css';
 
 function App() {
@@ -133,6 +135,14 @@ function App() {
 
         {activeTab === 'wms' && (
           <WmsDashboard />
+        )}
+
+        {activeTab === 'factory-editor' && (
+          <FactoryEditor onNavigateToMySim={() => setActiveTab('my-sim')} />
+        )}
+
+        {activeTab === 'my-sim' && (
+          <MySimDashboard onNavigateToEditor={() => setActiveTab('factory-editor')} />
         )}
       </div>
     </div>

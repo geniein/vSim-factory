@@ -1,6 +1,6 @@
-import { Home, Factory, MonitorPlay, ShieldAlert, Database, ShieldCheck, Truck, Wrench, Package } from 'lucide-react';
+import { Home, Factory, MonitorPlay, ShieldAlert, Database, ShieldCheck, Truck, Wrench, Package, Settings, Layers } from 'lucide-react';
 
-export type TabId = 'home' | 'live-monitor' | 'scada' | 'mes' | 'iqis' | 'fms' | 'cmms' | 'wms';
+export type TabId = 'home' | 'live-monitor' | 'scada' | 'mes' | 'iqis' | 'fms' | 'cmms' | 'wms' | 'factory-editor' | 'my-sim';
 
 interface SidebarProps {
   activeTab: TabId;
@@ -64,6 +64,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
       desc: '자동 창고 & 재고 관제',
       icon: <Package size={20} />,
       colorClass: 'rose-menu'
+    },
+    {
+      id: 'factory-editor' as TabId,
+      label: 'FACTORY EDITOR',
+      desc: '가상 공정 설계 빌더',
+      icon: <Settings size={20} />,
+      colorClass: 'fuchsia-menu'
+    },
+    {
+      id: 'my-sim' as TabId,
+      label: 'MY SIMULATION',
+      desc: '커스텀 공정 가동 모니터',
+      icon: <Layers size={20} />,
+      colorClass: 'violet-menu'
     }
   ];
 
@@ -373,6 +387,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
           opacity: 1;
           background: #f43f5e;
           box-shadow: 0 0 10px rgba(244, 63, 94, 0.8);
+        }
+
+        .fuchsia-menu.active {
+          background: rgba(217, 70, 239, 0.08);
+          border-color: rgba(217, 70, 239, 0.25);
+          box-shadow: 0 4px 15px rgba(217, 70, 239, 0.04);
+        }
+        .fuchsia-menu.active .nav-icon {
+          color: #d946ef;
+          filter: drop-shadow(0 0 6px rgba(217, 70, 239, 0.6));
+        }
+        .fuchsia-menu.active .nav-label { color: #ffffff; }
+        .fuchsia-menu.active .active-glow-bar {
+          opacity: 1;
+          background: #d946ef;
+          box-shadow: 0 0 10px rgba(217, 70, 239, 0.8);
+        }
+
+        .violet-menu.active {
+          background: rgba(139, 92, 246, 0.08);
+          border-color: rgba(139, 92, 246, 0.25);
+          box-shadow: 0 4px 15px rgba(139, 92, 246, 0.04);
+        }
+        .violet-menu.active .nav-icon {
+          color: #8b5cf6;
+          filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.6));
+        }
+        .violet-menu.active .nav-label { color: #ffffff; }
+        .violet-menu.active .active-glow-bar {
+          opacity: 1;
+          background: #8b5cf6;
+          box-shadow: 0 0 10px rgba(139, 92, 246, 0.8);
         }
 
         .sidebar-footer {
