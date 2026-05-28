@@ -529,11 +529,7 @@ async function runProcessBridge() {
       // CNC S7 Holding Register 2 (%MW2 - Chassis Present force) 에 1 기입 (address*2 = 4 -> DB1,INT4)
       s7Client.writeItems('DB1,INT4', 1, (err) => {
         if (!err) {
-          // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
-          setTimeout(() => {
-            log('BRIDGE', `Feeder ➔ CNC: 가공 Chassis Present (%MW2=0) 자동 회수`, colors.blue);
-            s7Client.writeItems('DB1,INT4', 0, (err) => {});
-          }, 1000);
+          log('BRIDGE', `Feeder ➔ CNC: 가공 Chassis Present (%MW2=1) 기입 완료`, colors.blue);
         }
       });
 
@@ -578,18 +574,7 @@ async function runProcessBridge() {
       ]);
       const valBuf = Buffer.from([1, 0]);
       mcSocket.write(Buffer.concat([header, valBuf]));
-      
-      // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
-      setTimeout(() => {
-        if (plcConnections.qc && mcSocket) {
-          log('BRIDGE', `CNC ➔ QC: 비전 Chassis Present (MC D2=0) 자동 회수`, colors.blue);
-          const resetHeader = Buffer.from([
-            0x50, 0x00, 0x00, 0xFF, 0xFF, 0x03, 0x00, 0x0E, 0x00, 0x10, 0x00, 0x01, 0x14, 0x00, 0x00, 0x02, 0x00, 0x00, 0xA8, 0x01, 0x00
-          ]);
-          const resetValBuf = Buffer.from([0, 0]);
-          mcSocket.write(Buffer.concat([resetHeader, resetValBuf]));
-        }
-      }, 1000);
+      log('BRIDGE', `CNC ➔ QC: 비전 Chassis Present (MC D2=1) 기입 완료`, colors.blue);
 
       // [MES] 이송이 완료된 이전 공정(CNC S7)의 시리얼 레지스터를 깨끗하게 리셋(0)하여 찌꺼기 렌더링 방지!
       setTimeout(() => {
@@ -642,22 +627,7 @@ async function runProcessBridge() {
         0x02, 0x00, 1, 0
       ]);
       xgtSocket.write(Buffer.concat([header, body]));
-      
-      // 1초 후 자동 회수하여 펄스 트리거 형태로 유지
-      setTimeout(() => {
-        if (plcConnections.sorter && xgtSocket) {
-          log('BRIDGE', `QC ➔ Sorter: 분류 Chassis Present (XGT %MW2=0) 자동 회수`, colors.blue);
-          const resetHeader = Buffer.from([
-            0x4C, 0x53, 0x49, 0x53, 0x2D, 0x58, 0x47, 0x54, // "LSIS-XGT"
-            0x00, 0x00, 0x00, 0x00, 0xA0, 0x33, 0x02, 0x00, 0x16, 0x00
-          ]);
-          const resetBody = Buffer.from([
-            0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x04, 0x00, 0x25, 0x4D, 0x57, 0x32, // "%MW2"
-            0x02, 0x00, 0, 0
-          ]);
-          xgtSocket.write(Buffer.concat([resetHeader, resetBody]));
-        }
-      }, 1000);
+      log('BRIDGE', `QC ➔ Sorter: 분류 Chassis Present (XGT %MW2=1) 기입 완료`, colors.blue);
 
       // [MES] 이송이 완료된 이전 공정(QC MC)의 시리얼 레지스터를 깨끗하게 리셋(0)하여 찌꺼기 렌더링 방지!
       setTimeout(() => {
@@ -1614,15 +1584,6 @@ wss.on('connection', (ws) => {
           }
 
           await modbusClient.writeSingleRegister(address, intVal);
-          if (address === 2 && intVal === 1) {
-            setTimeout(async () => {
-              try {
-                if (modbusClient && plcConnections.feeder) {
-                  await modbusClient.writeSingleRegister(address, 0);
-                }
-              } catch (err) {}
-            }, 1000);
-          }
         }
         else if (plcId === 'cnc' && plcConnections.cnc) {
           const intVal = parseInt(value, 10);

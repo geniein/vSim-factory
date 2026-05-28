@@ -92,6 +92,7 @@ export function useSimulation() {
     stats,
     dynamicStageCount,
     dynamicPlcsData,
+    plcData,
     lastTime: 0,
     spawnAccumulator: 0,
     uptimeAccumulator: 0,
@@ -110,7 +111,8 @@ export function useSimulation() {
     stateRef.current.stats = stats;
     stateRef.current.dynamicStageCount = dynamicStageCount;
     stateRef.current.dynamicPlcsData = dynamicPlcsData;
-  }, [isRunning, settings, items, machines, stats, dynamicStageCount, dynamicPlcsData]);
+    stateRef.current.plcData = plcData;
+  }, [isRunning, settings, items, machines, stats, dynamicStageCount, dynamicPlcsData, plcData]);
 
   // Helper to add system logs safely
   const addLog = useCallback((message: string, type: LogMessage['type'] = 'info') => {
