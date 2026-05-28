@@ -869,7 +869,7 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
         .mysim-dashboard-container {
           display: flex;
           flex-direction: column;
-          gap: 1.25rem;
+          gap: 1.5rem;
           width: 100%;
           animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
@@ -880,17 +880,86 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
           gap: 1.25rem;
         }
 
-        .mysim-glow {
-          border-color: rgba(168, 85, 247, 0.15);
+        @media (max-width: 1024px) {
+          .mysim-telemetry-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
         }
 
+        @media (max-width: 640px) {
+          .mysim-telemetry-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .telemetry-card {
+          background: rgba(13, 20, 38, 0.45);
+          border: 1px solid rgba(139, 92, 246, 0.15);
+          border-radius: 12px;
+          padding: 1.25rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+          transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .telemetry-card:hover {
+          border-color: rgba(139, 92, 246, 0.35);
+          box-shadow: 0 4px 25px rgba(139, 92, 246, 0.08);
+          transform: translateY(-2px);
+        }
+
+        .mysim-glow {
+          border-color: rgba(139, 92, 246, 0.25);
+        }
+
+        .telemetry-header {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+          font-size: 0.72rem;
+          font-weight: 700;
+          color: var(--text-secondary);
+          letter-spacing: 0.05em;
+        }
+
+        .telemetry-value {
+          font-size: 1.7rem;
+          font-weight: 800;
+          font-family: 'JetBrains Mono', monospace;
+        }
+
+        .telemetry-unit {
+          font-size: 0.85rem;
+          color: var(--text-secondary);
+          font-weight: 400;
+        }
+
+        .telemetry-divider {
+          color: var(--text-muted);
+          font-size: 1.1rem;
+          font-weight: 300;
+        }
+
+        .telemetry-footer {
+          font-size: 0.7rem;
+          color: var(--text-muted);
+          border-top: 1px solid rgba(255,255,255,0.04);
+          padding-top: 0.35rem;
+          margin-top: 0.25rem;
+        }
+
+        /* Remote Control Console Styling */
         .mysim-controls-panel {
+          background: rgba(13, 20, 38, 0.45);
+          border: 1px solid rgba(139, 92, 246, 0.18);
+          border-radius: 12px;
           padding: 0.75rem 1.25rem;
           display: flex;
           align-items: center;
           height: 3.5rem;
           box-sizing: border-box;
-          border-color: rgba(168, 85, 247, 0.25);
         }
 
         .sim-speed-hud {
@@ -904,13 +973,53 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
         }
 
         .mysim-mimic-panel {
+          background: rgba(13, 20, 38, 0.45);
+          border: 1px solid rgba(139, 92, 246, 0.15);
+          border-radius: 12px;
           padding: 1.25rem;
           display: flex;
           flex-direction: column;
           gap: 1rem;
         }
 
+        .mimic-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          padding-bottom: 0.75rem;
+        }
+
+        .mimic-header h3 {
+          font-size: 0.98rem;
+          font-weight: 700;
+          color: var(--text-primary);
+          margin: 0;
+          letter-spacing: 0.03em;
+        }
+
+        .mimic-canvas-wrapper {
+          width: 100%;
+          height: 390px;
+          background: rgba(4, 6, 14, 0.88);
+          border-radius: 12px;
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          box-shadow: inset 0 4px 24px rgba(0, 0, 0, 0.9);
+          overflow: hidden;
+          position: relative;
+        }
+
+        .mimic-canvas {
+          width: 100%;
+          height: 100%;
+          display: block;
+        }
+
+        /* PLC registers list */
         .custom-plc-panel {
+          background: rgba(13, 20, 38, 0.45);
+          border: 1px solid rgba(139, 92, 246, 0.15);
+          border-radius: 12px;
           padding: 1.25rem;
           display: flex;
           flex-direction: column;
@@ -920,6 +1029,59 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
           border: 1px solid rgba(255,255,255,0.04);
           background: rgba(4, 6, 14, 0.4);
           border-radius: 8px;
+          margin-top: 0.75rem;
+          max-height: 185px;
+          overflow-y: auto;
+        }
+
+        .plc-register-table {
+          width: 100%;
+          border-collapse: collapse;
+          text-align: left;
+          font-size: 0.72rem;
+        }
+
+        .plc-register-table th, .plc-register-table td {
+          padding: 0.6rem 0.8rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .plc-register-table th {
+          background: rgba(13, 20, 38, 0.75);
+          color: var(--text-secondary);
+          font-weight: 600;
+          font-size: 0.7rem;
+          letter-spacing: 0.5px;
+          text-transform: uppercase;
+        }
+
+        .plc-register-table tr:hover {
+          background: rgba(255, 255, 255, 0.015);
+        }
+
+        .plc-register-table .node-name {
+          color: var(--text-primary);
+          font-weight: 600;
+        }
+
+        .plc-badge-status {
+          font-size: 0.65rem;
+          font-weight: 700;
+          padding: 1.5px 5px;
+          border-radius: 4px;
+          letter-spacing: 0.5px;
+        }
+
+        .plc-badge-status.run {
+          background: rgba(16, 185, 129, 0.15);
+          color: var(--color-active-green);
+          border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .plc-badge-status.stop {
+          background: rgba(239, 68, 68, 0.15);
+          color: var(--color-error-crimson);
+          border: 1px solid rgba(239, 68, 68, 0.3);
         }
 
         /* Toast notifications inside simulation */
