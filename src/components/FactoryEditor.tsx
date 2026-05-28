@@ -61,6 +61,22 @@ export const FactoryEditor: React.FC<FactoryEditorProps> = ({ onNavigateToMySim 
     }, 3500);
   };
 
+  // Load layout from localStorage on mount if it exists
+  useEffect(() => {
+    const raw = localStorage.getItem('vsim_custom_layout');
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed.nodes && parsed.connections) {
+          setNodes(parsed.nodes);
+          setConnections(parsed.connections);
+        }
+      } catch (e) {
+        console.error('Failed to load custom layout in Editor', e);
+      }
+    }
+  }, []);
+
   const gridSnap = 20;
   const nodeWidth = 76;
   const nodeHeight = 52;
