@@ -76,6 +76,86 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
     }, 400);
     return () => clearInterval(interval);
   }, [isModalOpen]);
+
+  // Live WebSocket Connection to Gateway (ws://localhost:4546) for Custom vPLCs
+  const [liveVplcData, setLiveVplcData] = useState<Record<string, { online: boolean; values: Record<string, number> }>>({});
+  const wsRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    if (!layout || layout.nodes.length === 0) return;
+    
+    // Check if there is any node with vPLC enabled
+    const hasVplc = layout.nodes.some(n => n.parameters.vplcEnabled);
+    if (!hasVplc) {
+      setLiveVplcData({});
+      return;
+    }
+
+    console.log("🔌 커스텀 공정 vPLC 연동 활성화: 중계 게이트웨이(ws://localhost:4546) 연결 시도 중...");
+    
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket('ws://localhost:4546');
+      wsRef.current = socket;
+    } catch (e) {
+      console.warn("🔌 [커스텀 vPLC] 게이트웨이 웹소켓 초기화 실패. 로컬 가상 에뮬레이션으로 자동 대체합니다.");
+      return;
+    }
+
+    socket.onopen = () => {
+      console.log("🔌 [커스텀 vPLC] 중계 게이트웨이 소켓 연결 성공!");
+      
+      // Register custom PLCs
+      const regPacket = {
+        type: 'register_custom_plcs',
+        layoutId: 'vsim_custom_layout',
+        plcs: layout.nodes
+          .filter(n => n.parameters.vplcEnabled)
+          .map(n => ({
+            nodeId: n.id,
+            protocol: 'modbus',
+            ip: n.parameters.vplcIp || '127.0.0.1',
+            port: n.parameters.vplcPort || 502,
+            mappings: Object.entries(n.parameters)
+              .filter(([k]) => k.startsWith('vplcMapping_'))
+              .reduce((acc, [k, v]) => {
+                const paramName = k.replace('vplcMapping_', '');
+                acc[paramName] = v;
+                return acc;
+              }, {} as Record<string, any>)
+          }))
+      };
+      try {
+        socket.send(JSON.stringify(regPacket));
+      } catch (err) {
+        console.error("🔌 [커스텀 vPLC] 장치 등록 패킷 전송 실패", err);
+      }
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const packet = JSON.parse(event.data);
+        if (packet.type === 'custom_plc_telemetry') {
+          setLiveVplcData(packet.data || {});
+        }
+      } catch (err) {
+        // Silent catch
+      }
+    };
+
+    socket.onerror = () => {
+      // Graceful socket fallback
+    };
+
+    socket.onclose = () => {
+      console.log("🔌 [커스텀 vPLC] 소켓 연결이 닫혔습니다. 로컬 에뮬레이션 모드로 전환되었습니다.");
+    };
+
+    return () => {
+      socket.close();
+      wsRef.current = null;
+    };
+  }, [layout]);
   
   const nodeWidth = 76;
   const nodeHeight = 52;
@@ -119,8 +199,17 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
     };
     window.addEventListener('resize', handleResize);
 
-    // Helper to dynamically read parameters (simulating live vPLC register readings with realistic fluctuations)
+    // Helper to dynamically read parameters (prioritizing live C++ vPLC hardware registers, falling back to local simulation)
     const getNodeParameter = (node: Node, paramName: string, defaultValue: number | string) => {
+      // 1. If vPLC has sent real-time hardware values from the socket, prioritize using them
+      if (node.parameters.vplcEnabled && liveVplcData[node.id]?.online) {
+        const liveVal = liveVplcData[node.id].values?.[paramName];
+        if (liveVal !== undefined && liveVal !== null) {
+          return liveVal;
+        }
+      }
+
+      // 2. Otherwise, fall back to simulated vPLC telemetry with minor fluctuations
       if (node.parameters.vplcEnabled) {
         const mappingKey = `vplcMapping_${paramName}`;
         const mapping = node.parameters[mappingKey];
@@ -284,6 +373,42 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
       ctx.fill();
       ctx.stroke();
       ctx.restore();
+
+      // Draw vPLC overlay indicators if enabled
+      if (n.parameters.vplcEnabled) {
+        ctx.save();
+        // 1. Live status LED dot
+        const isSocketOnline = liveVplcData[n.id]?.online;
+        const isStoppedPlc = nodesActiveStatus[`${n.id}_VPLC`] === 'STOP';
+        
+        let ledColor = '#eab308'; // Pulsing Yellow (Local simulation fallback)
+        if (isStoppedPlc) ledColor = '#ef4444'; // Crimson Red (Stopped)
+        else if (isSocketOnline) ledColor = '#10b981'; // Emerald Green (Live Connected!)
+
+        ctx.fillStyle = ledColor;
+        ctx.shadowColor = ledColor;
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.arc(n.x - nodeWidth/2 + 10, n.y - nodeHeight/2 + 10, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. Mapped memory address (e.g. %MW1)
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.95)'; // light purple/amethyst
+        ctx.font = 'bold 7px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        
+        let mappingText = '%MW1';
+        if (n.type === 'feeder') mappingText = n.parameters.vplcMapping_feedRate || '%MW1';
+        else if (n.type === 'press') mappingText = n.parameters.vplcMapping_cycleDuration || '%MW2';
+        else if (n.type === 'weld_robot') mappingText = n.parameters.vplcMapping_cycleDuration || '%MW3';
+        else if (n.type === 'paint_spray') mappingText = n.parameters.vplcMapping_nozzlePressure || '%IW2';
+        else if (n.type === 'drying_oven') mappingText = n.parameters.vplcMapping_cycleDuration || '%MW4';
+        else if (n.type === 'storage_rack') mappingText = n.parameters.vplcMapping_storageCapacity || '%MW5';
+
+        ctx.fillText(mappingText, n.x + nodeWidth/2 - 6, n.y - nodeHeight/2 + 12);
+        ctx.restore();
+      }
 
       // 2. Title header
       ctx.fillStyle = titleBg;
@@ -1084,36 +1209,50 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', background: 'rgba(139, 92, 246, 0.04)', border: '1px solid rgba(139, 92, 246, 0.15)', borderRadius: '6px', padding: '6px' }}>
                     
+                    {/* Live connection state status badge */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.68rem', color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.03)', paddingBottom: '3px', marginBottom: '3px' }}>
+                      <span>연동 상태</span>
+                      <span style={{ color: liveVplcData[selectedNode.id]?.online ? '#10b981' : '#eab308', fontWeight: 'bold', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        {liveVplcData[selectedNode.id]?.online ? '🟢 LIVE CONNECTED' : '🟡 LOCAL SIMULATING'}
+                      </span>
+                    </div>
+
                     {Object.entries(selectedNode.parameters)
                       .filter(([k]) => k.startsWith('vplcMapping_'))
                       .map(([key, mappingVal]) => {
                         const paramName = key.replace('vplcMapping_', '');
                         const mappingRegister = String(mappingVal);
                         
-                        // Fetch baseline and calculate live dynamic value
+                        // Fetch baseline and calculate live dynamic value (prioritizing live websocket registers)
                         const baseline = selectedNode.parameters[paramName];
                         let liveVal = baseline;
-                        const timeSec = Date.now() / 1000;
-                        if (paramName === 'feedRate') {
-                          const offset = Math.sin(timeSec * 0.5) * 1.5;
-                          liveVal = Math.max(2.0, Math.min(8.0, Number(baseline || 4) + offset));
-                        } else if (paramName === 'cycleDuration') {
-                          const offset = Math.sin(timeSec * 0.7) * 0.8;
-                          liveVal = Math.max(1.0, Math.min(6.0, Number(baseline || 2) + offset));
-                        } else if (paramName === 'targetPressure') {
-                          const offset = Math.sin(timeSec * 0.3) * 12;
-                          liveVal = Math.round(Number(baseline || 210) + offset);
-                        } else if (paramName === 'arcCurrent') {
-                          const offset = Math.cos(timeSec * 0.6) * 8;
-                          liveVal = Math.round(Number(baseline || 120) + offset);
-                        } else if (paramName === 'nozzlePressure') {
-                          const offset = Math.sin(timeSec * 0.45) * 0.4;
-                          liveVal = Math.max(3.0, Math.min(6.0, Number(baseline || 4.5) + offset));
-                        } else if (paramName === 'targetTemp') {
-                          const offset = Math.sin(timeSec * 0.25) * 5;
-                          liveVal = Math.round(Number(baseline || 110) + offset);
-                        } else if (paramName === 'storageCapacity') {
-                          liveVal = Math.round(Number(baseline || 36));
+                        
+                        if (liveVplcData[selectedNode.id]?.online && liveVplcData[selectedNode.id].values?.[paramName] !== undefined && liveVplcData[selectedNode.id].values?.[paramName] !== null) {
+                          liveVal = liveVplcData[selectedNode.id].values[paramName];
+                        } else {
+                          // Fallback to simulated fluctuation
+                          const timeSec = Date.now() / 1000;
+                          if (paramName === 'feedRate') {
+                            const offset = Math.sin(timeSec * 0.5) * 1.5;
+                            liveVal = Math.max(2.0, Math.min(8.0, Number(baseline || 4) + offset));
+                          } else if (paramName === 'cycleDuration') {
+                            const offset = Math.sin(timeSec * 0.7) * 0.8;
+                            liveVal = Math.max(1.0, Math.min(6.0, Number(baseline || 2) + offset));
+                          } else if (paramName === 'targetPressure') {
+                            const offset = Math.sin(timeSec * 0.3) * 12;
+                            liveVal = Math.round(Number(baseline || 210) + offset);
+                          } else if (paramName === 'arcCurrent') {
+                            const offset = Math.cos(timeSec * 0.6) * 8;
+                            liveVal = Math.round(Number(baseline || 120) + offset);
+                          } else if (paramName === 'nozzlePressure') {
+                            const offset = Math.sin(timeSec * 0.45) * 0.4;
+                            liveVal = Math.max(3.0, Math.min(6.0, Number(baseline || 4.5) + offset));
+                          } else if (paramName === 'targetTemp') {
+                            const offset = Math.sin(timeSec * 0.25) * 5;
+                            liveVal = Math.round(Number(baseline || 110) + offset);
+                          } else if (paramName === 'storageCapacity') {
+                            liveVal = Math.round(Number(baseline || 36));
+                          }
                         }
 
                         // Display format
