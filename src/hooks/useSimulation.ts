@@ -37,7 +37,7 @@ export function useSimulation() {
     processingTime: 1.8,  // takes 1.8s to process
     defectRate: 5.0,      // 5% defect rate
     systemSpeed: 1.0,     // 1x speed
-    plcMode: 'dynamic'    // Set 'dynamic' (가변 멀티 공정) as the default mode upon reload!
+    plcMode: 'emulated'    // Set 'emulated' (가상 에뮬레이터) as the default mode!
   });
 
   const [items, setItems] = useState<Item[]>([]);
