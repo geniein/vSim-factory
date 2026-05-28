@@ -13,6 +13,15 @@ interface Alarm {
   message: string;
 }
 
+const generateSerialNo = () => {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const l1 = letters[Math.floor(Math.random() * 26)];
+  const l2 = letters[Math.floor(Math.random() * 26)];
+  const l3 = letters[Math.floor(Math.random() * 26)];
+  const num = Math.floor(100000 + Math.random() * 900000);
+  return `${l1}${l2}${l3} ${num}`;
+};
+
 export const ScadaDashboard: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -458,13 +467,14 @@ export const ScadaDashboard: React.FC = () => {
       hasEngine: boolean;
       hasGlass: boolean;
       color: string;
+      serialNo: string;
     }
 
     const vehicles: Vehicle[] = [
-      { id: 1, x: 0, y: 0, stageIdx: 0, progress: 0.1, hasDoors: true, hasEngine: false, hasGlass: false, color: '#38bdf8' },
-      { id: 2, x: 0, y: 0, stageIdx: 2, progress: 0.3, hasDoors: false, hasEngine: false, hasGlass: false, color: '#ec4899' },
-      { id: 3, x: 0, y: 0, stageIdx: 4, progress: 0.2, hasDoors: false, hasEngine: true, hasGlass: true, color: '#10b981' },
-      { id: 4, x: 0, y: 0, stageIdx: 6, progress: 0.8, hasDoors: true, hasEngine: true, hasGlass: true, color: '#f97316' },
+      { id: 1, x: 0, y: 0, stageIdx: 0, progress: 0.1, hasDoors: true, hasEngine: false, hasGlass: false, color: '#38bdf8', serialNo: generateSerialNo() },
+      { id: 2, x: 0, y: 0, stageIdx: 2, progress: 0.3, hasDoors: false, hasEngine: false, hasGlass: false, color: '#ec4899', serialNo: generateSerialNo() },
+      { id: 3, x: 0, y: 0, stageIdx: 4, progress: 0.2, hasDoors: false, hasEngine: true, hasGlass: true, color: '#10b981', serialNo: generateSerialNo() },
+      { id: 4, x: 0, y: 0, stageIdx: 6, progress: 0.8, hasDoors: true, hasEngine: true, hasGlass: true, color: '#f97316', serialNo: generateSerialNo() },
     ];
 
     let conveyorOffset = 0;
@@ -911,6 +921,7 @@ export const ScadaDashboard: React.FC = () => {
                   veh.hasEngine = false;
                   veh.hasGlass = false;
                   veh.color = ['#38bdf8', '#ec4899', '#10b981', '#f97316'][Math.floor(Math.random() * 4)];
+                  veh.serialNo = generateSerialNo();
                 }
               }
             }
@@ -942,6 +953,22 @@ export const ScadaDashboard: React.FC = () => {
           }
 
           drawCarOutline(ctx, vx, vy, veh.hasDoors, veh.hasEngine, veh.hasGlass, veh.color, veh.stageIdx, veh.progress);
+          
+          // Draw Serial Number HUD badge above vehicle
+          ctx.save();
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+          ctx.strokeStyle = veh.color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.roundRect(vx - 28, vy - 42, 56, 12, 3);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 7px JetBrains Mono';
+          ctx.textAlign = 'center';
+          ctx.fillText(veh.serialNo, vx, vy - 34);
+          ctx.restore();
         });
 
       } else if (activeSystem === 'welding') {

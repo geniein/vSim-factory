@@ -20,6 +20,15 @@ interface Connection {
   conveyorRpm: number;
 }
 
+const generateSerialNo = () => {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const l1 = letters[Math.floor(Math.random() * 26)];
+  const l2 = letters[Math.floor(Math.random() * 26)];
+  const l3 = letters[Math.floor(Math.random() * 26)];
+  const num = Math.floor(100000 + Math.random() * 900000);
+  return `${l1}${l2}${l3} ${num}`;
+};
+
 interface Material {
   id: string;
   x: number;
@@ -35,6 +44,7 @@ interface Material {
   hasBeenPainted: boolean;
   hasBeenBaked: boolean;
   hasBeenStored: boolean;
+  serialNo: string;
 }
 
 interface MySimDashboardProps {
@@ -393,6 +403,22 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
       }
 
       ctx.restore();
+
+      // Draw Serial Number HUD badge above custom material
+      ctx.save();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(m.x - 28, m.y - 20, 56, 11, 3);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 6.8px JetBrains Mono';
+      ctx.textAlign = 'center';
+      ctx.fillText(m.serialNo, m.x, m.y - 12);
+      ctx.restore();
     };
 
     const render = () => {
@@ -458,7 +484,8 @@ export const MySimDashboard: React.FC<MySimDashboardProps> = ({ onNavigateToEdit
                   hasBeenWelded: false,
                   hasBeenPainted: false,
                   hasBeenBaked: false,
-                  hasBeenStored: false
+                  hasBeenStored: false,
+                  serialNo: generateSerialNo()
                 };
                 activeMaterials.push(newMat);
               }
